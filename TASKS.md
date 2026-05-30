@@ -21,9 +21,10 @@
 - [ ] 实现 `install_faster_whisper.py` 的 venv 自动创建逻辑
 
 ### 1.2 前端对接 Rust 后端
-- [ ] 用 `@tauri-apps/api` 的 `invoke()` 替换 App.tsx 中的 `setTimeout` 模拟
-- [ ] 实现 SSE 事件监听 — `listen("claude-stream-delta", ...)` 实时笔记生成
-- [ ] 进度条对接真实的 `PipelineProgress` 事件
+- [x] `api.ts` 封装所有 Tauri invoke() 调用（类型安全 + 浏览器降级）
+- [x] App.tsx 启动时从 Rust 读取配置，首启自动跳转配置页
+- [x] SSE 事件监听 `listen("claude-stream-delta")` 封装
+- [ ] 进度条对接真实的 `PipelineProgress` 事件（依赖 1.3）
 
 ### 1.3 管线编排实现
 - [ ] Rust `pipeline.rs` 实现 `execute(input, config)` 主函数
