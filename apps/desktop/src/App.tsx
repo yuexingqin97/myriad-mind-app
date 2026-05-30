@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   type MyriadMindConfig,
   type DashboardData,
@@ -14,50 +14,28 @@ import {
   Button,
   Input,
   Card,
-  Modal,
 } from "@myriad-mind/ui";
 import "./App.css";
 
-type View = "input" | "dashboard";
+type View = "input" | "dashboard" | "config";
+
+const STORAGE_KEY = "myriad-mind-configured";
 
 const mockDashboardData: DashboardData = {
   cultivation: calculateCultivation({
-    totalNotes: 3,
-    beginnerNotes: 1,
-    intermediateNotes: 1,
-    advancedNotes: 1,
-    uniqueSources: 2,
-    techStacks: 3,
-    totalHours: 5.2,
-    avgReadingTime: 15,
-    topTags: [
-      { tag: "#Rust", count: 2 },
-      { tag: "#Bevy", count: 2 },
-      { tag: "#ECS", count: 1 },
-    ],
+    totalNotes: 3, beginnerNotes: 1, intermediateNotes: 1, advancedNotes: 1,
+    uniqueSources: 2, techStacks: 3, totalHours: 5.2, avgReadingTime: 15,
+    topTags: [{ tag: "#Rust", count: 2 }, { tag: "#Bevy", count: 2 }, { tag: "#ECS", count: 1 }],
   }),
   stats: {
-    totalNotes: 3,
-    beginnerNotes: 1,
-    intermediateNotes: 1,
-    advancedNotes: 1,
-    uniqueSources: 2,
-    techStacks: 3,
-    totalHours: 5.2,
-    avgReadingTime: 15,
-    topTags: [
-      { tag: "#Rust", count: 2 },
-      { tag: "#Bevy", count: 2 },
-      { tag: "#ECS", count: 1 },
-    ],
+    totalNotes: 3, beginnerNotes: 1, intermediateNotes: 1, advancedNotes: 1,
+    uniqueSources: 2, techStacks: 3, totalHours: 5.2, avgReadingTime: 15,
+    topTags: [{ tag: "#Rust", count: 2 }, { tag: "#Bevy", count: 2 }, { tag: "#ECS", count: 1 }],
   },
   achievements: checkAchievements(
-    {
-      totalNotes: 3, beginnerNotes: 1, intermediateNotes: 1, advancedNotes: 1,
+    { totalNotes: 3, beginnerNotes: 1, intermediateNotes: 1, advancedNotes: 1,
       uniqueSources: 2, techStacks: 3, totalHours: 5.2, avgReadingTime: 15,
-      topTags: [{ tag: "#Rust", count: 2 }],
-    },
-    []
+      topTags: [{ tag: "#Rust", count: 2 }] }, []
   ),
   recentNotes: [
     { title: "Bevy ECS 架构源码分析", date: "2026-05-20", type: "video" },
@@ -68,14 +46,39 @@ const mockDashboardData: DashboardData = {
 };
 
 function App() {
-  const [view, setView] = useState<View>("input");
-  const [config, setConfig] = useState<MyriadMindConfig>(DEFAULT_CONFIG);
-  const [showConfig, setShowConfig] = useState(false);
+  // 首次启动检测：localStorage 无标记 → 默认显示配置页
+  const [view, setView] = useState<View>(() => {
+    const configured = localStorage.getItem(STORAGE_KEY);
+    return configured === "true" ? "input" : "config";
+  });
+  const [config, setConfig] = useState<MyriadMindConfig>(() => {
+    try {
+      const saved = localStorage.getItem("myriad-mind-config");
+      if (saved) return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+    } catch { /* ignore */ }
+    return DEFAULT_CONFIG;
+  });
   const [inputUrl, setInputUrl] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [dashboardData] = useState<DashboardData>(mockDashboardData);
   const [processing, setProcessing] = useState(false);
+
+  // 保存配置
+  const handleSaveConfig = useCallback((c: MyriadMindConfig) => {
+    setConfig(c);
+    localStorage.setItem(STORAGE_KEY, "true");
+    localStorage.setItem("myriad-mind-config", JSON.stringify(c));
+    setView("input"); // 保存后跳转炼化页
+  }, []);
+
+  // 标记已配置（从配置页离开也算）
+  const handleConfigDone = useCallback(() => {
+    if (config.output.note_dir) {
+      localStorage.setItem(STORAGE_KEY, "true");
+    }
+    setView("input");
+  }, [config]);
 
   const handleSubmit = useCallback(async () => {
     if (!inputUrl.trim()) return;
@@ -120,26 +123,15 @@ function App() {
         </div>
 
         <div className="sidebar-nav">
-          <NavButton
-            active={view === "input"}
-            icon="📥"
-            label="炼化"
-            hotkey="1"
-            onClick={() => setView("input")}
-          />
-          <NavButton
-            active={view === "dashboard"}
-            icon="📊"
-            label="修为"
-            hotkey="2"
-            onClick={() => setView("dashboard")}
-          />
+          <NavButton active={view === "input"} icon="📥" label="炼化" hotkey="1" onClick={() => setView("input")} />
+          <NavButton active={view === "dashboard"} icon="📊" label="修为" hotkey="2" onClick={() => setView("dashboard")} />
+          <NavButton active={view === "config"} icon="⚙️" label="配置" hotkey="3" onClick={() => setView("config")} />
         </div>
 
         <div className="sidebar-footer">
-          <Button variant="ghost" size="sm" onClick={() => setShowConfig(true)}>
-            ⚙️ 配置
-          </Button>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            v0.1.0 · Windows
+          </span>
         </div>
       </nav>
 
@@ -160,11 +152,7 @@ function App() {
                   onChange={(e) => setInputUrl(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
                 />
-                <Button
-                  onClick={handleSubmit}
-                  disabled={!inputUrl.trim() || processing}
-                  loading={processing}
-                >
+                <Button onClick={handleSubmit} disabled={!inputUrl.trim() || processing} loading={processing}>
                   炼化
                 </Button>
               </div>
@@ -184,7 +172,6 @@ function App() {
               )}
             </div>
 
-            {/* 四种输入类型提示 */}
             <div style={{ marginBottom: 16 }}>
               <h3 style={{ fontSize: 13, fontWeight: 600, color: "#a0a0c0", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 🎯 支持的输入类型
@@ -197,28 +184,10 @@ function App() {
               </div>
             </div>
 
-            {/* 管线步骤预览 */}
-            <Card
-              title="⚡ 处理管线"
-              subtitle="桌面端完整 10 步数据流"
-              variant="elevated"
-            >
+            <Card title="⚡ 处理管线" subtitle="桌面端完整数据流" variant="elevated">
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {[
-                  "模式识别", "灵力预估", "视频下载", "音频提取",
-                  "ASR 转写", "关键帧", "AI 笔记", "清理", "面板更新",
-                ].map((step, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      padding: "4px 10px",
-                      fontSize: 11,
-                      borderRadius: 6,
-                      background: "var(--bg-root)",
-                      border: "1px solid var(--border)",
-                      color: "var(--text-secondary)",
-                    }}
-                  >
+                {["模式识别", "灵力预估", "视频下载", "音频提取", "ASR 转写", "关键帧", "AI 笔记", "清理", "面板更新"].map((step, i) => (
+                  <span key={i} style={{ padding: "4px 10px", fontSize: 11, borderRadius: 6, background: "var(--bg-root)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
                     {i + 1}. {step}
                   </span>
                 ))}
@@ -230,41 +199,34 @@ function App() {
         {view === "dashboard" && (
           <div className="view-container">
             <h2 className="view-title">📊 修为面板</h2>
-            <p className="view-subtitle">
-              修炼进度 · 统计面板 · 成就系统 · 知识图谱
-            </p>
+            <p className="view-subtitle">修炼进度 · 统计面板 · 成就系统</p>
             <Dashboard data={dashboardData} />
           </div>
         )}
-      </main>
 
-      {/* 配置弹窗 */}
-      <Modal
-        open={showConfig}
-        onClose={() => setShowConfig(false)}
-        title="⚙️ 配置向导"
-        size="lg"
-      >
-        <ConfigWizard
-          config={config}
-          onSave={(c) => { setConfig(c); setShowConfig(false); }}
-          onCancel={() => setShowConfig(false)}
-        />
-      </Modal>
+        {view === "config" && (
+          <div className="view-container">
+            <h2 className="view-title">⚙️ 配置</h2>
+            <p className="view-subtitle">
+              配置 ASR 后端、视频解析、功能开关、输出路径等参数（对应原 myriad-mind .env）
+            </p>
+            <ConfigWizard
+              config={config}
+              onSave={handleSaveConfig}
+              onCancel={handleConfigDone}
+            />
+          </div>
+        )}
+      </main>
     </div>
   );
 }
 
-function NavButton({
-  active, icon, label, hotkey, onClick,
-}: {
+function NavButton({ active, icon, label, hotkey, onClick }: {
   active: boolean; icon: string; label: string; hotkey: string; onClick: () => void;
 }) {
   return (
-    <button
-      className={`nav-btn${active ? " nav-btn-active" : ""}`}
-      onClick={onClick}
-    >
+    <button className={`nav-btn${active ? " nav-btn-active" : ""}`} onClick={onClick}>
       <span style={{ fontSize: 16 }}>{icon}</span>
       <span style={{ flex: 1 }}>{label}</span>
       <span style={{ fontSize: 10, opacity: 0.4 }}>{hotkey}</span>
@@ -272,11 +234,7 @@ function NavButton({
   );
 }
 
-function HintCard({
-  icon, title, desc,
-}: {
-  icon: string; title: string; desc: string;
-}) {
+function HintCard({ icon, title, desc }: { icon: string; title: string; desc: string }) {
   return (
     <div className="hint-card">
       <span style={{ fontSize: 22 }}>{icon}</span>
