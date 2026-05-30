@@ -64,12 +64,23 @@ apps/mobile/       → React Native Expo
 - 确保没有跨包引用错误
 
 ## 规则
-1. 每完成一个主要步骤 commit 一次 (git add -A && git commit -m "message")
+1. **阶段性提交** — 每个子任务完成后立即 git commit，不要攒到最后：
+   - 完成环境检查 → commit "chore: env setup"
+   - 完成 packages/core → commit "feat: core package"
+   - 完成 packages/ui → commit "feat: ui package"
+   - 完成 apps/desktop 骨架 → commit "feat: desktop app scaffold"
+   - 完成 apps/mobile 骨架 → commit "feat: mobile app scaffold"
+   - 每个独立功能或模块完成马上提交，不延迟
 2. 如果某个脚手架命令失败，手动创建文件
 3. 不要删除任何已有文档
 4. 配置文件名和目录结构参照 docs/architecture.md
-5. 遇到依赖安装失败，跳过并记录在 commit message
-6. 完成后输出 DONE 并列出创建的文件清单
+5. **不阻塞原则** — 遇到以下情况立即跳过，记录在 commit message，继续做其他事：
+   - 权限不足（如 npm install -g 需要管理员）
+   - 网络超时/下载失败（重试 1 次仍失败就跳过）
+   - 脚手架命令不可用（改用文件手动创建）
+   - 任何需要人工干预的操作
+   跳过某个功能后，优先开发不依赖该功能的其他模块。不要因为一个卡住就停下来。
+6. 完成后输出 DONE 并列出创建的文件清单 + 跳过的任务及原因
 
 ## 成功标准
 - pnpm workspace 可正常安装依赖

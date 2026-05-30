@@ -1,16 +1,41 @@
 // ============================================================
 // @myriad-mind/ui — 共享 React 组件入口
-//
-// 未来将包含:
-//   - ConfigWizard  配置向导
-//   - NoteRenderer  Markdown 笔记渲染
-//   - Dashboard     修为面板
-//   - common        通用组件 (Button, Input, Card, Modal 等)
 // ============================================================
 
-// 骨架 — 目前仅占位
-export const UI_VERSION = "0.1.0";
+// Common
+export {
+  Button,
+  Card,
+  Modal,
+  Input,
+  Textarea,
+  Select,
+  Toggle,
+} from "./common/index.js";
+export type {
+  ButtonProps,
+  ButtonVariant,
+  ButtonSize,
+  CardProps,
+  ModalProps,
+  InputProps,
+  TextareaProps,
+  SelectProps,
+  SelectOption,
+  ToggleProps,
+} from "./common/index.js";
 
-// TODO: export { ConfigWizard } from "./ConfigWizard.js";
-// TODO: export { NoteRenderer } from "./NoteRenderer.js";
-// TODO: export { Dashboard } from "./Dashboard.js";
+// ConfigWizard
+export { ConfigWizard } from "./ConfigWizard.js";
+export type { ConfigWizardProps } from "./ConfigWizard.js";
+
+// NoteRenderer
+export { NoteRenderer, renderMarkdown } from "./NoteRenderer.js";
+export type { NoteRendererProps } from "./NoteRenderer.js";
+
+// Dashboard
+export { Dashboard } from "./Dashboard.js";
+export type { DashboardProps } from "./Dashboard.js";
+
+// Version
+export const UI_VERSION = "0.2.0";
