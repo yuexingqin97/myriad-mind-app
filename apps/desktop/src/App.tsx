@@ -16,6 +16,7 @@ import {
   Card,
 } from "@myriad-mind/ui";
 import * as api from "./api";
+import { DepsPanel } from "./components/DepsPanel";
 import "./App.css";
 
 type View = "input" | "dashboard" | "config";
@@ -213,8 +214,9 @@ function App() {
           <div className="view-container">
             <h2 className="view-title">⚙️ 配置</h2>
             <p className="view-subtitle">
-              配置 ASR 后端、视频解析、功能开关、输出路径等参数（对应原 myriad-mind .env）
+              配置 Python 路径、ASR 后端、视频解析、功能开关、输出路径等参数
             </p>
+            <DepsPanel />
             <ConfigWizard
               config={config}
               onSave={handleSaveConfig}
