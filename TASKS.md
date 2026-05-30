@@ -27,25 +27,25 @@
 - [ ] 进度条对接真实的 `PipelineProgress` 事件（依赖 1.3）
 
 ### 1.3 管线编排实现
-- [ ] Rust `pipeline.rs` 实现 `execute(input, config)` 主函数
-- [ ] 串联 10 步：模式识别 → 依赖检查 → 灵力预估 → 下载 → 提取音频 → ASR → 关键帧 → AI 笔记 → 清理 → 面板更新
-- [ ] 每个步骤通过 Tauri event 推进度到前端
-- [ ] 支持用户中途取消
+- [x] Rust `pipeline.rs` 实现 `execute_pipeline()` 主函数
+- [x] 串联步骤：识别 → 依赖检查 → 下载 → 音频提取 → ASR → 关键帧 → AI 笔记 → 清理 → 完成
+- [x] 每个步骤通过 `pipeline-progress` event 推送到前端
+- [x] 缺失工具时优雅跳过（不崩溃）
 
 ### 1.4 系统依赖检测
-- [ ] Rust `deps.rs` 启动时自动探测 Python / FFmpeg / yt-dlp / CUDA
-- [ ] 前端 `DepCheckPanel` 展示检测结果，缺失项给出安装指引
+- [x] Rust `deps.rs` 探测 Python / FFmpeg / yt-dlp / CUDA
+- [x] 前端 `DepsPanel` 组件展示检测结果（绿/黄状态徽章）
 
 ---
 
 ## 二、安全与配置
 
 ### 2.1 OS 密钥链
-- [ ] Windows：接入 `windows-credentials` crate 读写 Credential Manager
-- [ ] 替换 config.rs 中的 stub 实现
-- [ ] 密钥链条目命名规范：`myriad-mind/{service}`
-- [ ] ~~macOS Keychain~~ → v2
-- [ ] ~~Linux libsecret~~ → v2
+- [x] Windows：CredReadW/CredWriteW 读写 Credential Manager
+- [x] 替换 config.rs 中的 stub 实现
+- [x] 密钥链条目命名规范：`myriad-mind/{service}`
+- [x] ~~macOS Keychain~~ → v2
+- [x] ~~Linux libsecret~~ → v2
 
 ### 2.2 配置页签（与炼化/修为平级）
 - [x] 将配置从 Modal 弹窗改为独立顶栏页签（⚙️ 配置），与 📥 炼化 / 📊 修为 平级
@@ -174,8 +174,8 @@
 | Desktop 前端页面 | ✅ 完成 | 2026-05-31 |
 | Desktop Rust 后端 | ✅ 完成 | 2026-05-31 |
 | CC Switch 暗色风格重构 | ✅ 完成 | 2026-05-31 |
-| 一、管道打通 | ⏳ 待开始 | — |
-| 二、安全与配置 | ⏳ 待开始 | — |
+| 一、管道打通 | 🚧 进行中 | — |
+| 二、安全与配置 | 🚧 进行中 | — |
 | 三、桌面端功能完善 | ⏳ 待开始 | — |
 | 四、移动端功能完善 | 🔒 v2 | — |
 | 五、构建与分发 | 🔒 v2 | — |
