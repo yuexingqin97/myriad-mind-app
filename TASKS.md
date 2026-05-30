@@ -2,7 +2,7 @@
 
 > 最后更新：2026-05-31
 >
-> **v1.0 定位**：专注"输入 → 炼化 → 生成笔记"，修为面板展示列表 + 统计。不提供笔记阅读/编辑/搜索功能，用系统默认 .md 编辑器打开即可。
+> **v1.0 定位**：Windows 桌面端优先。专注"输入 → 炼化 → 生成笔记"，修为面板展示列表 + 统计。移动端、macOS/Linux 桌面端延后至 v2。
 
 ---
 
@@ -41,10 +41,10 @@
 
 ### 2.1 OS 密钥链
 - [ ] Windows：接入 `windows-credentials` crate 读写 Credential Manager
-- [ ] macOS：接入 `security-framework` crate 读写 Keychain
-- [ ] Linux：接入 `libsecret` 或 `oo7` crate
 - [ ] 替换 config.rs 中的 stub 实现
 - [ ] 密钥链条目命名规范：`myriad-mind/{service}`
+- [ ] ~~macOS Keychain~~ → v2
+- [ ] ~~Linux libsecret~~ → v2
 
 ### 2.2 配置页签（与炼化/修为平级）
 - [ ] 将配置从 Modal 弹窗改为独立顶栏页签（⚙️ 配置），与 📥 炼化 / 📊 修为 平级
@@ -61,9 +61,9 @@
 - [ ] 敏感字段（API Key）仅显示脱敏形式（`sk-ant-...xxxx`），编辑时写入 OS 密钥链而非明文
 
 ### 2.3 配置存储层
-- [ ] 配置读写到 `%APPDATA%/myriad-mind/config.json`
+- [ ] Windows：配置读写到 `%APPDATA%/myriad-mind/config.json`
 - [ ] 版本号 + 迁移逻辑（`version: 1` → 后续升级）
-- [ ] 移动端配置存储（AsyncStorage）
+- [ ] ~~移动端配置存储~~ → v2
 
 ### 2.4 API Key 管理
 - [ ] Claude API Key — 从密钥链读取，前端只显示 `sk-ant-...xxxx`
@@ -114,19 +114,17 @@
 
 ---
 
-## 四、移动端功能完善
+## 四、移动端功能完善 [→ v2 延后]
 
-### 4.1 文章处理
+> ⚠️ v1.0 仅 Windows 桌面端。移动端全部延后至 v2。
+
+### 4.1 文章处理 [v2]
 - [ ] fetch URL → 提取正文 → Claude API → 写 .md
-- [ ] SSE 流式生成（expo 的 Text 逐字显示）
 
-### 4.2 笔记列表展示
-- [ ] 扫描笔记目录，展示列表（标题/日期/类型）
-- [ ] ~~WebView Markdown 渲染~~ → 砍掉，移动端用系统文件管理器查看 .md
-- [ ] ~~全文搜索~~ → v2
+### 4.2 笔记列表展示 [v2]
+- [ ] 扫描笔记目录，展示列表
 
-### 4.3 修为面板
-- [ ] 纯计算（已有 `calculateCultivation` / `checkAchievements`）
+### 4.3 修为面板 [v2]
 - [ ] 与桌面端共享 `@myriad-mind/core`
 
 ---
@@ -135,13 +133,12 @@
 
 ### 5.1 桌面端打包
 - [ ] Windows：`.msi` 安装包 + `.exe` 便携版
-- [ ] macOS：`.dmg` + `.app` 签名公证
 - [ ] 自动更新：`tauri-plugin-updater` + GitHub Releases
+- [ ] ~~macOS (.dmg)~~ → v2
+- [ ] ~~Linux (.AppImage/.deb)~~ → v2
 
-### 5.2 移动端打包
-- [ ] Android：EAS Build → `.aab`（Play Store）/ `.apk`
-- [ ] iOS：EAS Build → `.ipa`（TestFlight）
-- [ ] 鸿蒙：PWA (Phase 1) → ArkTS WebView (Phase 2)
+### 5.2 移动端打包 [→ v2]
+- [ ] Android / iOS / 鸿蒙 — 全部延后
 
 ### 5.3 CI/CD
 - [ ] GitHub Actions：push main → lint + test + build
@@ -184,8 +181,8 @@
 | 一、管道打通 | ⏳ 待开始 | — |
 | 二、安全与配置 | ⏳ 待开始 | — |
 | 三、桌面端功能完善 | ⏳ 待开始 | — |
-| 四、移动端功能完善 | ⏳ 待开始 | — |
-| 五、构建与分发 | ⏳ 待开始 | — |
+| 四、移动端功能完善 | 🔒 v2 | — |
+| 五、构建与分发 | 🔒 v2 | — |
 | 六、品质与文档 | ⏳ 待开始 | — |
 
 ---
@@ -193,11 +190,7 @@
 ## 当前里程碑
 
 ```
-已完成的脚手架 ──────────────────────────── ✗
-                                                   │
-通往第一个可用版本 ─── 1.x 管线打通 ─── 安全配置 ─── ✗  ← 你在这里
-                                                   │
-功能完善 ─── 视频/文章/本地/代码 ─── 笔记管理 ────── ✗
-                                                   │
-发布就绪 ─── 测试 ─── 打包 ─── CI/CD ─── 文档 ──── ✗
+Windows v1.0 ─── 一、管道打通 ─── 二、安全配置 ─── 三、功能完善 ─── ✗  ← 你在这里
+                                                                          │
+v2 ─── 移动端 ─── macOS/Linux ─── 构建分发 ─── 测试文档 ──────────────── ✗
 ```
