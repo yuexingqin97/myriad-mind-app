@@ -1,0 +1,21 @@
+{
+  "name": "myriad-mind-app",
+  "private": true,
+  "description": "大衍决 — 神识一扫，万物皆可为笔记",
+  "scripts": {
+    "dev:desktop": "pnpm -F @myriad-mind/desktop dev",
+    "dev:mobile": "pnpm -F @myriad-mind/mobile start",
+    "build": "pnpm -r run build",
+    "build:core": "pnpm -F @myriad-mind/core build",
+    "build:ui": "pnpm -F @myriad-mind/ui build",
+    "build:desktop": "pnpm -F @myriad-mind/desktop build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "clean": "pnpm -r exec rm -rf dist build target .expo node_modules"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@11.5.0"
+}
