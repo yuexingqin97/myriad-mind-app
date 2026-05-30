@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "默认权限集 — 允许窗口操作和基本 IPC",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}

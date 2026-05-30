@@ -1,0 +1,32 @@
+[package]
+name = "myriad-mind-desktop"
+version = "0.1.0"
+description = "大衍决桌面端 — Tauri 2.x"
+authors = ["myriad-mind"]
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "myriad_mind_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# TODO: 以下依赖将在后续管线实现中激活
+# reqwest = { version = "0.12", features = ["json", "stream"] }
+# tokio = { version = "1", features = ["full"] }
+# tokio-stream = "0.1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
