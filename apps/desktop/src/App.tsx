@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import {
   type MyriadMindConfig,
   type DashboardData,
-  type Note,
   DEFAULT_CONFIG,
   classifyInput,
   estimateCost,
@@ -11,7 +10,6 @@ import {
 } from "@myriad-mind/core";
 import {
   ConfigWizard,
-  NoteRenderer,
   Dashboard,
   Button,
   Input,
@@ -20,7 +18,7 @@ import {
 } from "@myriad-mind/ui";
 import "./App.css";
 
-type View = "input" | "notes" | "dashboard";
+type View = "input" | "dashboard";
 
 const mockDashboardData: DashboardData = {
   cultivation: calculateCultivation({
@@ -76,7 +74,6 @@ function App() {
   const [inputUrl, setInputUrl] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
-  const [selectedNote] = useState<Note | null>(null);
   const [dashboardData] = useState<DashboardData>(mockDashboardData);
   const [processing, setProcessing] = useState(false);
 
@@ -131,17 +128,10 @@ function App() {
             onClick={() => setView("input")}
           />
           <NavButton
-            active={view === "notes"}
-            icon="📝"
-            label="笔记"
-            hotkey="2"
-            onClick={() => setView("notes")}
-          />
-          <NavButton
             active={view === "dashboard"}
             icon="📊"
             label="修为"
-            hotkey="3"
+            hotkey="2"
             onClick={() => setView("dashboard")}
           />
         </div>
@@ -234,28 +224,6 @@ function App() {
                 ))}
               </div>
             </Card>
-          </div>
-        )}
-
-        {view === "notes" && (
-          <div className="view-container">
-            <h2 className="view-title">📝 笔记浏览</h2>
-            {selectedNote ? (
-              <NoteRenderer note={selectedNote} />
-            ) : (
-              <Card
-                title="尚无笔记"
-                subtitle="去「炼化」页面生成第一篇笔记吧"
-                variant="elevated"
-              >
-                <div className="empty-state">
-                  <p>支持视频链接、文章 URL、本地文件等多种输入</p>
-                  <p style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-                    🔮 灵力预估 · Mermaid 图表 · 术语表 · 评论区精华 · 知识关系图
-                  </p>
-                </div>
-              </Card>
-            )}
           </div>
         )}
 

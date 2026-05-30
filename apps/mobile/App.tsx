@@ -9,15 +9,13 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { cultivationEmoji, calculateCultivation, computeStats, DEFAULT_CONFIG } from "@myriad-mind/core";
 import { HomeScreen } from "./screens/HomeScreen";
-import { NoteScreen } from "./screens/NoteScreen";
 import { ConfigScreen } from "./screens/ConfigScreen";
 import { DashboardScreen } from "./screens/DashboardScreen";
 
-type Tab = "home" | "notes" | "dashboard" | "config";
+type Tab = "home" | "dashboard" | "config";
 
 const tabs: Array<{ key: Tab; icon: string; label: string }> = [
   { key: "home", icon: "📥", label: "炼化" },
-  { key: "notes", icon: "📝", label: "笔记" },
   { key: "dashboard", icon: "📊", label: "修为" },
   { key: "config", icon: "⚙️", label: "配置" },
 ];
@@ -52,7 +50,6 @@ export default function App() {
       {/* Content */}
       <View style={styles.content}>
         {activeTab === "home" && <HomeScreen config={config} />}
-        {activeTab === "notes" && <NoteScreen />}
         {activeTab === "dashboard" && <DashboardScreen stats={mockStats} />}
         {activeTab === "config" && (
           <ConfigScreen config={config} onSave={setConfig} />

@@ -1,10 +1,19 @@
 # 大衍决 App — 开发任务清单
 
 > 最后更新：2026-05-31
+>
+> **v1.0 定位**：专注"输入 → 炼化 → 生成笔记"，修为面板展示列表 + 统计。不提供笔记阅读/编辑/搜索功能，用系统默认 .md 编辑器打开即可。
 
 ---
 
 ## 一、管道打通（让炼化流程真正跑起来）
+
+### 1.0 内嵌 Python 环境（免安装）
+- [ ] Tauri bundle 打包 Python 3.12 Embeddable（Windows 专用，~12MB）
+- [ ] 首次启动自动解压到 `~/.cache/myriad-mind/python/`
+- [ ] 自动安装 pip + faster-whisper + yt-dlp 到 embeddable Python
+- [ ] macOS / Linux 探测系统自带 Python 3，无需打包
+- [ ] Rust `deps.rs` 优先使用内嵌 Python → 回退系统 Python
 
 ### 1.1 接入 Python 脚本
 - [ ] 将 `D:/Project/MyClaude/myriad-mind/scripts/` 作为 git submodule 引入到 `scripts/`
@@ -74,12 +83,14 @@
 - [ ] 本地代码目录同理
 - [ ] 灵力评估（按文件数分四级，>300 文件必须确认）
 
-### 3.5 笔记浏览与管理
-- [ ] 文件系统扫描 `note_dir` 下所有 .md
-- [ ] 笔记列表（标题/日期/类型/难度）
-- [ ] SQLite FTS5 全文搜索
-- [ ] Mermaid 图表渲染（客户端 mermaid.js）
-- [ ] 截图资产预览（`assets/{ID}/` 下图片）
+### 3.5 笔记列表展示（修为面板中）
+- [ ] 扫描 `note_dir` 下所有 .md，解析 front matter 获取元信息
+- [ ] 在修为面板 Dashboard 中展示笔记列表（标题/日期/类型/难度/阅读时长）
+- [ ] 点击笔记 → 用系统默认 .md 编辑器打开（`open` / `xdg-open`）
+- [ ] ~~SQLite FTS5 全文搜索~~ → v2
+- [ ] ~~内嵌 Mermaid 图表渲染~~ → v2
+- [ ] ~~截图资产预览~~ → v2
+- [ ] ~~内嵌笔记阅读器~~ → 砍掉，用系统编辑器
 
 ### 3.6 修为面板
 - [ ] 扫描笔记目录统计（已有 `computeStats`）
@@ -96,10 +107,10 @@
 - [ ] fetch URL → 提取正文 → Claude API → 写 .md
 - [ ] SSE 流式生成（expo 的 Text 逐字显示）
 
-### 4.2 笔记浏览
-- [ ] WebView 渲染 Markdown（marked.js + mermaid.js）
-- [ ] 截图本地加载（expo-file-system）
-- [ ] 笔记列表滚动 + 搜索
+### 4.2 笔记列表展示
+- [ ] 扫描笔记目录，展示列表（标题/日期/类型）
+- [ ] ~~WebView Markdown 渲染~~ → 砍掉，移动端用系统文件管理器查看 .md
+- [ ] ~~全文搜索~~ → v2
 
 ### 4.3 修为面板
 - [ ] 纯计算（已有 `calculateCultivation` / `checkAchievements`）
