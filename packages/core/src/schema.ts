@@ -54,6 +54,7 @@ export const PostProcessSchema = z.object({
 
 export const ConfigSchema = z.object({
   version: z.literal(1),
+  python_path: z.string().optional().default(""),
   asr: ASRSchema,
   video: VideoSchema,
   features: FeaturesSchema,
@@ -69,6 +70,7 @@ export type MyriadMindConfig = z.infer<typeof ConfigSchema>;
  */
 export const DEFAULT_CONFIG: MyriadMindConfig = {
   version: 1,
+  python_path: "", // 留空 = 自动探测系统 Python
   asr: {
     backend: "faster-whisper",
     faster_whisper: {

@@ -93,6 +93,7 @@ export interface PostProcessConfig {
 
 export interface MyriadMindConfig {
   version: 1;
+  python_path?: string; // Python 解释器路径（如 C:/python/python.exe），留空自动探测
   asr: ASRConfig;
   video: VideoConfig;
   features: FeaturesConfig;

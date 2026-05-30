@@ -119,6 +119,13 @@ function ASRStep({
 }) {
   return (
     <div className="space-y-4">
+      <Input
+        label="Python 路径（留空自动探测）"
+        value={config.python_path ?? ""}
+        placeholder="自动探测系统 Python… 例：C:/Users/xxx/.cache/myriad-mind/faster-whisper-venv/Scripts/python.exe"
+        hint="对应原 FW_PYTHON 环境变量。留空则搜索 PATH 中的 python3/python"
+        onChange={(e) => update("python_path", e.target.value)}
+      />
       <Select
         label="ASR 后端"
         options={[
