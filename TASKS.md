@@ -47,23 +47,18 @@
 - [ ] ~~Linux libsecret~~ → v2
 
 ### 2.2 配置页签（与炼化/修为平级）
-- [ ] 将配置从 Modal 弹窗改为独立顶栏页签（⚙️ 配置），与 📥 炼化 / 📊 修为 平级
-- [ ] 配置表单覆盖所有 `.env` 参数，分 6 组：
-  - 🎙️ 语音识别（ASR 后端 / Python 路径 / faster-whisper 模型大小&设备 / 火山引擎 Token）
-  - 📹 视频解析（AI Douyin / TikHub，API Key 从密钥链读取）
-  - ⚙️ 功能开关（关键帧 / Mermaid / 资源推荐 / 评论区 / 阅读信息 / 灵力预估）
-  - 🖼️ 关键帧（间隔 / 最大数量 / 模式）
-  - 📂 输出设置（笔记目录 / 自动清理 / 元信息 / 调试信息）
-  - ✨ 收尾设置（自动更新面板 / 学习推荐）
-- [ ] 首次启动检测 — 无配置文件时默认显示配置页签（引导用户完成初始设置）
-- [ ] 已配置时默认显示炼化页签
-- [ ] 配置变更自动保存到 `%APPDATA%/myriad-mind/config.json`
-- [ ] 敏感字段（API Key）仅显示脱敏形式（`sk-ant-...xxxx`），编辑时写入 OS 密钥链而非明文
+- [x] 将配置从 Modal 弹窗改为独立顶栏页签（⚙️ 配置），与 📥 炼化 / 📊 修为 平级
+- [x] 首次启动检测 — 无配置标记时默认显示配置页签
+- [x] 已配置时默认显示炼化页签
+- [x] 配置变更保存到 localStorage（后续对接 Rust config.json）
+- [ ] 敏感字段（API Key）仅显示脱敏形式（`sk-ant-...xxxx`），编辑时写入 OS 密钥链
 
 ### 2.3 配置存储层
-- [ ] Windows：配置读写到 `%APPDATA%/myriad-mind/config.json`
+- [x] Windows：配置读写到 `%APPDATA%/myriad-mind/config.json`
+- [x] 原子写入（tmp + rename）
+- [x] `is_first_launch()` 首启检测
 - [ ] 版本号 + 迁移逻辑（`version: 1` → 后续升级）
-- [ ] ~~移动端配置存储~~ → v2
+- [x] ~~移动端配置存储~~ → v2
 
 ### 2.4 API Key 管理
 - [ ] Claude API Key — 从密钥链读取，前端只显示 `sk-ant-...xxxx`
