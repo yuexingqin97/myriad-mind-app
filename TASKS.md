@@ -8,12 +8,12 @@
 
 ## 一、管道打通（让炼化流程真正跑起来）
 
-### 1.0 内嵌 Python 环境（免安装）
-- [ ] Tauri bundle 打包 Python 3.12 Embeddable（Windows 专用，~12MB）
-- [ ] 首次启动自动解压到 `~/.cache/myriad-mind/python/`
-- [ ] 自动安装 pip + faster-whisper + yt-dlp 到 embeddable Python
-- [ ] macOS / Linux 探测系统自带 Python 3，无需打包
-- [ ] Rust `deps.rs` 优先使用内嵌 Python → 回退系统 Python
+### 1.0 用户配置 Python 路径
+- [ ] 配置页签中增加"Python 路径"字段（类似 `FW_PYTHON` 环境变量）
+- [ ] 首次启动自动探测系统 Python（PATH 扫描 `python3` / `python`），填入默认值
+- [ ] 用户可手动覆盖路径（如指定安装了 faster-whisper 的 venv Python）
+- [ ] Rust `deps.rs` 读取配置中的 Python 路径，校验版本 >= 3.9
+- [ ] 探测失败时在配置页签显示警告："未检测到 Python 3.9+，请安装或手动指定路径"
 
 ### 1.1 接入 Python 脚本
 - [ ] 将 `D:/Project/MyClaude/myriad-mind/scripts/` 作为 git submodule 引入到 `scripts/`
@@ -49,7 +49,7 @@
 ### 2.2 配置页签（与炼化/修为平级）
 - [ ] 将配置从 Modal 弹窗改为独立顶栏页签（⚙️ 配置），与 📥 炼化 / 📊 修为 平级
 - [ ] 配置表单覆盖所有 `.env` 参数，分 6 组：
-  - 🎙️ 语音识别（ASR 后端 / faster-whisper 模型大小/设备 / 火山引擎 Token）
+  - 🎙️ 语音识别（ASR 后端 / Python 路径 / faster-whisper 模型大小&设备 / 火山引擎 Token）
   - 📹 视频解析（AI Douyin / TikHub，API Key 从密钥链读取）
   - ⚙️ 功能开关（关键帧 / Mermaid / 资源推荐 / 评论区 / 阅读信息 / 灵力预估）
   - 🖼️ 关键帧（间隔 / 最大数量 / 模式）
