@@ -9,11 +9,11 @@
 ## 一、管道打通（让炼化流程真正跑起来）
 
 ### 1.0 用户配置 Python 路径
-- [ ] 配置页签中增加"Python 路径"字段（类似 `FW_PYTHON` 环境变量）
-- [ ] 首次启动自动探测系统 Python（PATH 扫描 `python3` / `python`），填入默认值
-- [ ] 用户可手动覆盖路径（如指定安装了 faster-whisper 的 venv Python）
+- [x] 配置页签中增加"Python 路径"字段（类似 `FW_PYTHON` 环境变量）
+- [x] 用户可手动指定路径（如安装了 faster-whisper 的 venv Python）
+- [x] 留空 = 自动探测系统 Python（PATH 扫描）
 - [ ] Rust `deps.rs` 读取配置中的 Python 路径，校验版本 >= 3.9
-- [ ] 探测失败时在配置页签显示警告："未检测到 Python 3.9+，请安装或手动指定路径"
+- [ ] 探测失败时在配置页签显示警告
 
 ### 1.1 接入 Python 脚本
 - [ ] 将 `D:/Project/MyClaude/myriad-mind/scripts/` 作为 git submodule 引入到 `scripts/`

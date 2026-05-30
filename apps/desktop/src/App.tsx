@@ -15,11 +15,10 @@ import {
   Input,
   Card,
 } from "@myriad-mind/ui";
+import * as api from "./api";
 import "./App.css";
 
 type View = "input" | "dashboard" | "config";
-
-const STORAGE_KEY = "myriad-mind-configured";
 
 const mockDashboardData: DashboardData = {
   cultivation: calculateCultivation({
@@ -46,39 +45,45 @@ const mockDashboardData: DashboardData = {
 };
 
 function App() {
-  // 首次启动检测：localStorage 无标记 → 默认显示配置页
-  const [view, setView] = useState<View>(() => {
-    const configured = localStorage.getItem(STORAGE_KEY);
-    return configured === "true" ? "input" : "config";
-  });
-  const [config, setConfig] = useState<MyriadMindConfig>(() => {
-    try {
-      const saved = localStorage.getItem("myriad-mind-config");
-      if (saved) return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
-    } catch { /* ignore */ }
-    return DEFAULT_CONFIG;
-  });
+  const [view, setView] = useState<View>("config");
+  const [ready, setReady] = useState(false);
+  const [config, setConfig] = useState<MyriadMindConfig>(DEFAULT_CONFIG);
   const [inputUrl, setInputUrl] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [dashboardData] = useState<DashboardData>(mockDashboardData);
   const [processing, setProcessing] = useState(false);
 
+  // 启动时检测首启 + 加载配置
+  useEffect(() => {
+    (async () => {
+      const first = await api.isFirstLaunch();
+      if (!first) {
+        try {
+          const raw = await api.readConfig();
+          if (raw && raw !== "{}") {
+            setConfig((prev) => ({ ...prev, ...JSON.parse(raw) }));
+          }
+          setView("input");
+        } catch {
+          setView("config");
+        }
+      } else {
+        setView("config");
+      }
+      setReady(true);
+    })();
+  }, []);
+
   // 保存配置
   const handleSaveConfig = useCallback((c: MyriadMindConfig) => {
     setConfig(c);
-    localStorage.setItem(STORAGE_KEY, "true");
-    localStorage.setItem("myriad-mind-config", JSON.stringify(c));
-    setView("input"); // 保存后跳转炼化页
+    api.writeConfig(JSON.stringify(c));
+    setView("input");
   }, []);
 
-  // 标记已配置（从配置页离开也算）
-  const handleConfigDone = useCallback(() => {
-    if (config.output.note_dir) {
-      localStorage.setItem(STORAGE_KEY, "true");
-    }
-    setView("input");
-  }, [config]);
+  // 跳过配置
+  const handleConfigDone = useCallback(() => setView("input"), []);
 
   const handleSubmit = useCallback(async () => {
     if (!inputUrl.trim()) return;
