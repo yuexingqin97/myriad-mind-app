@@ -1,0 +1,27 @@
+{
+  "name": "@myriad-mind/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "大衍决共享核心逻辑 — 配置/Prompt/笔记解析/面板计算/灵力预估",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint ok'"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
