@@ -8,8 +8,8 @@ mod error;
 use commands::{
     claude::{call_claude, stream_note_generation},
     config::{
-        check_keychain_entry, get_config_path, read_config, read_keychain_entry,
-        store_keychain_entry, write_config,
+        check_keychain_entry, get_config_info, is_first_launch, read_config,
+        read_keychain_entry, reset_config, store_keychain_entry, write_config,
     },
     deps::{detect_all_deps, detect_ffmpeg, detect_gpu, detect_python, detect_ytdlp},
     fs::{cleanup_temp, copy_asset, read_text_file, scan_directory, write_note},
@@ -44,9 +44,11 @@ pub fn run() {
             detect_gpu,
             detect_all_deps,
             // 配置
-            get_config_path,
+            get_config_info,
+            is_first_launch,
             read_config,
             write_config,
+            reset_config,
             check_keychain_entry,
             store_keychain_entry,
             read_keychain_entry,

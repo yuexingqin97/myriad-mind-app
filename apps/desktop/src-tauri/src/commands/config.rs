@@ -1,91 +1,120 @@
 // ============================================================
-// 配置命令 — 配置读写 + OS 密钥链
-// 与 docs/architecture.md §2 对齐
+// 配置命令 — 配置读写 + 首启检测 + OS 密钥链
+// Windows v1: %APPDATA%/myriad-mind/config.json
 // ============================================================
 
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ConfigFileInfo {
-    pub path: String,
-    pub exists: bool,
-}
+// ---- 路径 ----
 
-/// 获取配置文件默认路径
-fn config_path() -> PathBuf {
-    dirs_next().join("myriad-mind-config.json")
-}
-
-fn dirs_next() -> PathBuf {
-    // 跨平台配置目录
+/// 配置目录: %APPDATA%/myriad-mind/
+fn config_dir() -> PathBuf {
     if cfg!(target_os = "windows") {
         std::env::var("APPDATA")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-    } else if cfg!(target_os = "macos") {
-        dirs_macos()
-    } else {
-        std::env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
             .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-                PathBuf::from(home).join(".config")
+                std::env::var("USERPROFILE")
+                    .map(|h| PathBuf::from(h).join("AppData").join("Roaming"))
+                    .unwrap_or_else(|_| PathBuf::from("."))
             })
+    } else {
+        // macOS/Linux fallback (v2)
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        if cfg!(target_os = "macos") {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+        } else {
+            PathBuf::from(home).join(".config")
+        }
     }
     .join("myriad-mind")
 }
 
-fn dirs_macos() -> PathBuf {
-    std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join("Library").join("Application Support"))
-        .unwrap_or_else(|_| PathBuf::from("."))
+/// 配置文件完整路径
+fn config_file() -> PathBuf {
+    config_dir().join("config.json")
 }
 
-/// 获取配置文件信息
+// ---- 数据结构 ----
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConfigFileInfo {
+    pub path: String,
+    pub exists: bool,
+    pub is_first_launch: bool,
+}
+
+// ---- 命令 ----
+
+/// 获取配置文件路径信息（用于首启检测）
 #[tauri::command]
-pub fn get_config_path() -> ConfigFileInfo {
-    let path = config_path().join("config.json");
+pub fn get_config_info() -> ConfigFileInfo {
+    let path = config_file();
     ConfigFileInfo {
-        path: path.to_string_lossy().to_string(),
         exists: path.exists(),
+        is_first_launch: !path.exists(),
+        path: path.to_string_lossy().to_string(),
     }
 }
 
-/// 读取配置文件内容
+/// 检查是否首次启动
+#[tauri::command]
+pub fn is_first_launch() -> bool {
+    !config_file().exists()
+}
+
+/// 读取配置（无文件时返回空对象）
 #[tauri::command]
 pub async fn read_config() -> Result<String, AppError> {
-    let path = config_path().join("config.json");
+    let path = config_file();
     if path.exists() {
-        Ok(std::fs::read_to_string(&path).map_err(AppError::Io)?)
+        std::fs::read_to_string(&path).map_err(|e| {
+            AppError::Config(format!("读取配置失败: {e}"))
+        })
     } else {
-        // 返回空对象 JSON
         Ok("{}".to_string())
     }
 }
 
-/// 写入配置文件
+/// 写入配置（原子写入：先写 .tmp 再 rename）
 #[tauri::command]
 pub async fn write_config(content: String) -> Result<(), AppError> {
-    let dir = config_path();
-    std::fs::create_dir_all(&dir).map_err(AppError::Io)?;
-    let path = dir.join("config.json");
-    std::fs::write(&path, &content).map_err(AppError::Io)?;
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        AppError::Config(format!("创建配置目录失败: {e}"))
+    })?;
+
+    let path = config_file();
+    let tmp = dir.join("config.json.tmp");
+
+    // 原子写入
+    std::fs::write(&tmp, &content).map_err(|e| {
+        AppError::Config(format!("写入配置失败: {e}"))
+    })?;
+
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        AppError::Config(format!("保存配置失败: {e}"))
+    })?;
+
     Ok(())
 }
 
-// ---- OS 密钥链操作 ----
-//
-// 各平台实现：
-//   Windows: Credential Manager (wincred)
-//   macOS:   Keychain (security framework)
-//   Linux:   libsecret (secret-tool / keyring)
-//
-// 当前为 stub 实现，生产环境需要接入：
-//   - Windows: windows-credentials crate
-//   - macOS: security-framework crate
-//   - Linux: oo7 or libsecret crate
+/// 删除配置文件（用于重置）
+#[tauri::command]
+pub async fn reset_config() -> Result<(), AppError> {
+    let path = config_file();
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| {
+            AppError::Config(format!("删除配置失败: {e}"))
+        })?;
+    }
+    Ok(())
+}
+
+// ---- OS 密钥链 (Windows Credential Manager) ----
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KeychainEntry {
@@ -94,29 +123,59 @@ pub struct KeychainEntry {
     pub exists: bool,
 }
 
-/// 检查密钥链中是否存在指定凭据
+/// 检查密钥链条目
 #[tauri::command]
-pub async fn check_keychain_entry(service: String, account: String) -> Result<KeychainEntry, AppError> {
-    // Stub: 生产环境需调用 OS 原生 API
-    Ok(KeychainEntry {
-        service,
-        account,
-        exists: false,
-    })
+pub async fn check_keychain_entry(
+    service: String,
+    account: String,
+) -> Result<KeychainEntry, AppError> {
+    // Windows: Credential Manager
+    #[cfg(target_os = "windows")]
+    {
+        match windows_credentials(&service, &account) {
+            Ok(Some(_)) => Ok(KeychainEntry {
+                service,
+                account,
+                exists: true,
+            }),
+            Ok(None) => Ok(KeychainEntry {
+                service,
+                account,
+                exists: false,
+            }),
+            Err(e) => Err(AppError::Config(format!("密钥链读取失败: {e}"))),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (service, account);
+        Ok(KeychainEntry {
+            service: "stub".into(),
+            account: "stub".into(),
+            exists: false,
+        })
+    }
 }
 
-/// 将凭据写入 OS 密钥链
+/// 写入凭据到 OS 密钥链
 #[tauri::command]
 pub async fn store_keychain_entry(
     service: String,
     account: String,
-    _secret: String,
+    secret: String,
 ) -> Result<(), AppError> {
-    // Stub: 生产环境需调用 OS 原生 API
-    let _ = (service, account);
-    Err(AppError::Other(
-        "密钥链功能尚未实现。请通过系统设置手动配置 API Key。".into(),
-    ))
+    #[cfg(target_os = "windows")]
+    {
+        windows_credentials_write(&service, &account, &secret)
+            .map_err(|e| AppError::Config(format!("密钥链写入失败: {e}")))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (service, account, secret);
+        Err(AppError::Other("密钥链仅支持 Windows (v1)。".into()))
+    }
 }
 
 /// 从 OS 密钥链读取凭据
@@ -125,9 +184,126 @@ pub async fn read_keychain_entry(
     service: String,
     account: String,
 ) -> Result<String, AppError> {
-    // Stub: 生产环境需调用 OS 原生 API
-    let _ = (service, account);
-    Err(AppError::Other(
-        "密钥链功能尚未实现。".into(),
-    ))
+    #[cfg(target_os = "windows")]
+    {
+        windows_credentials(&service, &account)?.ok_or_else(|| {
+            AppError::Config(format!("密钥链中未找到: {service}/{account}"))
+        })
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (service, account);
+        Err(AppError::Other("密钥链仅支持 Windows (v1)。".into()))
+    }
+}
+
+// ---- Windows Credential Manager ----
+//
+// 使用 Win32 CredReadW / CredWriteW API 读写 Windows 凭据管理器。
+// 条目命名: myriad-mind/{service}  (如 myriad-mind/claude-api-key)
+
+#[cfg(target_os = "windows")]
+mod windows_cred {
+    use windows::core::{HSTRING, PWSTR};
+    use windows::Win32::Security::Credentials::{
+        CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
+        CRED_TYPE_GENERIC,
+    };
+
+    /// 读取凭据，返回 UTF-8 密码；不存在返回 None
+    pub fn read(target: &str) -> Result<Option<String>, String> {
+        let target_h = HSTRING::from(target);
+
+        let mut cred_ptr: *mut CREDENTIALW = std::ptr::null_mut();
+
+        let result =
+            unsafe { CredReadW(&target_h, CRED_TYPE_GENERIC, None, &mut cred_ptr) };
+
+        if result.is_err() || cred_ptr.is_null() {
+            return Ok(None);
+        }
+
+        unsafe {
+            let cred = &*cred_ptr;
+            let blob_ptr = cred.CredentialBlob;
+            let blob_size = cred.CredentialBlobSize as usize;
+
+            let secret = if blob_size > 0 && !blob_ptr.is_null() {
+                let bytes = std::slice::from_raw_parts(blob_ptr, blob_size);
+                let utf16: Vec<u16> = bytes
+                    .chunks_exact(2)
+                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                    .collect();
+                String::from_utf16(&utf16).unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            CredFree(cred_ptr as *const _);
+
+            Ok(Some(secret.trim_end_matches('\0').to_string()))
+        }
+    }
+
+    /// 写入凭据
+    pub fn write(
+        target: &str,
+        username: &str,
+        secret: &str,
+    ) -> Result<(), String> {
+        let target_wide: Vec<u16> =
+            target.encode_utf16().chain(std::iter::once(0)).collect();
+        let username_wide: Vec<u16> =
+            username.encode_utf16().chain(std::iter::once(0)).collect();
+        let secret_utf16: Vec<u16> = secret.encode_utf16().collect();
+        let blob_bytes: Vec<u8> =
+            secret_utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
+
+        use windows::Win32::Security::Credentials::CRED_FLAGS;
+
+        let credential = CREDENTIALW {
+            Flags: CRED_FLAGS(0),
+            Type: CRED_TYPE_GENERIC,
+            TargetName: PWSTR(target_wide.as_ptr() as *mut _),
+            Comment: PWSTR::null(),
+            LastWritten: windows::Win32::Foundation::FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            },
+            CredentialBlobSize: blob_bytes.len() as u32,
+            CredentialBlob: blob_bytes.as_ptr() as *mut u8,
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            AttributeCount: 0,
+            Attributes: std::ptr::null_mut(),
+            TargetAlias: PWSTR::null(),
+            UserName: PWSTR(username_wide.as_ptr() as *mut _),
+        };
+
+        unsafe {
+            CredWriteW(&credential, 0)
+                .map_err(|e| format!("CredWriteW 失败: {e:?}"))?;
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_credentials(
+    service: &str,
+    _account: &str,
+) -> Result<Option<String>, String> {
+    let target = format!("myriad-mind/{service}");
+    windows_cred::read(&target)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_credentials_write(
+    service: &str,
+    account: &str,
+    secret: &str,
+) -> Result<(), String> {
+    let target = format!("myriad-mind/{service}");
+    windows_cred::write(&target, account, secret)
 }
