@@ -13,7 +13,7 @@ use commands::{
     },
     deps::{detect_all_deps, detect_ffmpeg, detect_gpu, detect_python, detect_ytdlp},
     fs::{cleanup_temp, copy_asset, read_text_file, scan_directory, write_note},
-    pipeline::build_pipeline,
+    pipeline::execute_pipeline,
     python::{check_python_env, extract_keyframes, transcribe_audio},
 };
 
@@ -66,7 +66,7 @@ pub fn run() {
             cleanup_temp,
             copy_asset,
             // 管线编排
-            build_pipeline,
+            execute_pipeline,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
