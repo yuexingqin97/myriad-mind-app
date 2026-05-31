@@ -266,6 +266,259 @@ body {
   color: var(--text-muted);
 }
 
+/* ---- Settings Page (CC Switch 风格) ---- */
+.settings-page {
+  max-width: 760px;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.settings-tab {
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.settings-tab:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-tab-active {
+  color: var(--primary-hover);
+  background: var(--primary-muted);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+.settings-content {
+  padding-bottom: 60px;
+}
+
+.settings-section {
+  margin-bottom: 28px;
+}
+
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+
+/* Pill 按钮 */
+.settings-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.settings-pill {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-root);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.settings-pill:hover {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.settings-pill-active {
+  color: var(--primary-hover);
+  background: var(--primary-muted);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+/* API Key 行 */
+.settings-key-row {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  transition: border-color 0.15s;
+}
+
+.settings-key-set {
+  border-color: rgba(74, 222, 128, 0.25);
+}
+
+.settings-key-required {
+  border-color: rgba(248, 113, 113, 0.25);
+}
+
+.settings-key-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.settings-key-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-key-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.settings-key-badge-required {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.settings-key-badge-ok {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.settings-key-badge-optional {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.1);
+}
+
+.settings-key-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 4px;
+}
+
+.settings-key-masked {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: "Cascadia Code", "Fira Code", monospace;
+  background: var(--bg-root);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.settings-key-edit {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.settings-key-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-root);
+  color: var(--text);
+  outline: none;
+}
+
+.settings-key-input:focus {
+  border-color: var(--primary);
+}
+
+.settings-key-save-btn {
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: none;
+  background: var(--primary);
+  color: white;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.settings-key-save-btn:hover {
+  background: var(--primary-hover);
+}
+
+.settings-key-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-key-cancel-btn {
+  padding: 6px 12px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.settings-key-edit-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.settings-key-edit-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary-hover);
+}
+
+/* 底部保存栏 */
+.settings-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  background: var(--bg-root);
+  border-top: 1px solid var(--border);
+}
+
+.settings-footer-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* ---- Mermaid dark theme override ---- */
 .prose pre.mermaid {
   background: var(--bg-root) !important;

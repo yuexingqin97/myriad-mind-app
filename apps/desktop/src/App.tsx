@@ -10,6 +10,7 @@ import {
 } from "@myriad-mind/core";
 import {
   ConfigWizard,
+  SettingsPage,
   Dashboard,
   Button,
   Input,
@@ -20,7 +21,7 @@ import * as api from "./api";
 import { DepsPanel } from "./components/DepsPanel";
 import "./App.css";
 
-type View = "input" | "dashboard" | "config";
+type View = "input" | "dashboard" | "settings";
 
 // ---- Mock 数据（浏览器预览用）----
 
@@ -59,7 +60,6 @@ const mockPipelineSteps = [
 
 // ---- Helpers ----
 
-/** 是否在 Tauri 桌面环境中运行 */
 let _isTauri: boolean | null = null;
 async function isTauri(): Promise<boolean> {
   if (_isTauri !== null) return _isTauri;
@@ -76,6 +76,7 @@ async function isTauri(): Promise<boolean> {
 
 function App() {
   const [view, setView] = useState<View>("input");
+  const [firstLaunch, setFirstLaunch] = useState(false);
   const [config, setConfig] = useState<MyriadMindConfig>(DEFAULT_CONFIG);
   const [inputUrl, setInputUrl] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -98,37 +99,35 @@ function App() {
     },
   }), []);
 
-  // 启动时：Tauri 环境读配置 + 首启检测，浏览器环境直接进入炼化页
+  // 启动时
   useEffect(() => {
     (async () => {
       if (await isTauri()) {
         const first = await api.isFirstLaunch();
-        if (!first) {
+        if (first) {
+          setFirstLaunch(true);
+          setView("settings"); // 首启跳转设置页
+        } else {
           try {
             const raw = await api.readConfig();
             if (raw && raw !== "{}") {
               setConfig((prev) => ({ ...prev, ...JSON.parse(raw) }));
             }
-            setView("input");
-          } catch {
-            setView("config");
-          }
-        } else {
-          setView("config");
+          } catch { /* ignore */ }
         }
       }
-      // 浏览器模式: 默认 input 页，mock 数据即可
     })();
   }, []);
 
-  // 保存配置
+  // 保存设置
   const handleSaveConfig = useCallback((c: MyriadMindConfig) => {
     setConfig(c);
     api.writeConfig(JSON.stringify(c));
-    setView("input");
-  }, []);
-
-  const handleConfigDone = useCallback(() => setView("input"), []);
+    if (firstLaunch) {
+      setFirstLaunch(false);
+      setView("input");
+    }
+  }, [firstLaunch]);
 
   // ---- 炼化提交 ----
 
@@ -145,7 +144,6 @@ function App() {
     setProgress(0);
 
     if (await isTauri()) {
-      // ====== Tauri 真实管线 ======
       const unlisten = api.listenPipelineProgress((event) => {
         setProgress(Math.round(event.percent));
         setStatus(event.label);
@@ -182,7 +180,6 @@ function App() {
         unlisten();
       }
     } else {
-      // ====== 浏览器 Mock 模拟 ======
       for (const step of mockPipelineSteps) {
         await new Promise((r) => setTimeout(r, 350 + Math.random() * 250));
         setStatus(step.label);
@@ -194,12 +191,14 @@ function App() {
     }
   }, [inputUrl, config, processing]);
 
-  // 清理
   useEffect(() => {
     return () => { pipelineCancelRef.current?.(); };
   }, []);
 
   // ---- Render ----
+
+  // 首次启动 → 显示向导
+  const showWizard = firstLaunch && view === "settings";
 
   return (
     <div className="app-root">
@@ -216,7 +215,7 @@ function App() {
         <div className="sidebar-nav">
           <NavButton active={view === "input"} icon="📥" label="炼化" hotkey="1" onClick={() => setView("input")} />
           <NavButton active={view === "dashboard"} icon="📊" label="修为" hotkey="2" onClick={() => setView("dashboard")} />
-          <NavButton active={view === "config"} icon="⚙️" label="配置" hotkey="3" onClick={() => setView("config")} />
+          <NavButton active={view === "settings"} icon="⚙️" label="设置" hotkey="3" onClick={() => setView("settings")} />
         </div>
 
         <div className="sidebar-footer">
@@ -298,19 +297,28 @@ function App() {
           </div>
         )}
 
-        {view === "config" && (
+        {view === "settings" && (
           <div className="view-container">
-            <h2 className="view-title">⚙️ 配置</h2>
-            <p className="view-subtitle">
-              配置 Python 路径、ASR 后端、视频解析、功能开关、输出路径等参数
-            </p>
-            <DepsPanel pythonPath={config.python_path || undefined} />
-            <ConfigWizard
-              config={config}
-              onSave={handleSaveConfig}
-              onCancel={handleConfigDone}
-              keychain={keychainAdapter}
-            />
+            <h2 className="view-title">⚙️ 设置</h2>
+            <p className="view-subtitle">管理应用配置、API 密钥和功能偏好</p>
+
+            {showWizard ? (
+              <ConfigWizard
+                config={config}
+                onSave={handleSaveConfig}
+                onCancel={() => { setFirstLaunch(false); }}
+                keychain={keychainAdapter}
+              />
+            ) : (
+              <>
+                <DepsPanel pythonPath={config.python_path || undefined} />
+                <SettingsPage
+                  config={config}
+                  onSave={handleSaveConfig}
+                  keychain={keychainAdapter}
+                />
+              </>
+            )}
           </div>
         )}
       </main>
