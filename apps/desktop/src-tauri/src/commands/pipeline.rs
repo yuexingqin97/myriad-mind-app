@@ -350,7 +350,6 @@ fn emit_progress(
     status: &str,
     detail: Option<&str>,
 ) {
-    eprintln!("[pipeline] emit: step={step}, label={label}, status={status}, pct={percent}");
     let event = PipelineProgressEvent {
         step: step.to_string(),
         label: label.to_string(),
@@ -358,9 +357,9 @@ fn emit_progress(
         status: status.to_string(),
         detail: detail.map(|s| s.to_string()),
     };
-    match app.emit("pipeline-progress", event) {
-        Ok(()) => eprintln!("[pipeline] emit OK"),
-        Err(e) => eprintln!("[pipeline] emit FAILED: {e}"),
+    log::info!("[pipeline] {status:>9} | {percent:>5.0}% | {step} | {label}");
+    if let Err(e) = app.emit("pipeline-progress", event) {
+        log::error!("[pipeline] emit failed: {e}");
     }
 }
 

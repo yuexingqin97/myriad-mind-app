@@ -81,7 +81,7 @@ pub async fn stream_deepseek(
 
     let url = format!("{BASE_URL}{CHAT_ENDPOINT}");
 
-    eprintln!("[mind-engine] DeepSeek request: model={model}, task={}", request.task);
+    log::info!("[mind-engine] request: model={model}, task={}", request.task);
 
     let response = client
         .post(&url)
@@ -217,8 +217,8 @@ pub async fn stream_deepseek(
         },
     );
 
-    eprintln!(
-        "[mind-engine] DeepSeek done: model={model}, text_len={}, reasoning_len={}",
+    log::info!(
+        "[mind-engine] done: model={model}, text={}chars, reasoning={}chars",
         full_text.len(),
         reasoning_text.len(),
     );
