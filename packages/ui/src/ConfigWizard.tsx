@@ -666,16 +666,20 @@ function OutputStep({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <Input
-              label="笔记输出目录 *"
-              value={config.output.note_dir}
-              placeholder="必填 — 例如: D:/Notes/MyriadMind"
-              hint="笔记将保存到此目录。推荐选云盘文件夹以实现跨设备同步"
-              onChange={(e) => update("output", { ...config.output, note_dir: e.target.value })}
-            />
-          </div>
+        <span style={{ fontSize: 12, color: "var(--text-secondary, #a0a0c0)", marginBottom: 4, display: "block" }}>
+          笔记输出目录 *
+        </span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={config.output.note_dir}
+            onChange={(e) => update("output", { ...config.output, note_dir: e.target.value })}
+            placeholder="必填 — 例如: D:/Notes/MyriadMind"
+            style={{
+              flex: 1, padding: "8px 12px", fontSize: 13, borderRadius: 8,
+              border: "1px solid var(--border, #333)", background: "var(--bg-input, #1f2026)",
+              color: "var(--text, #e0e0f0)", outline: "none",
+            }}
+          />
           {onSelectDir && (
             <button
               onClick={async () => {
@@ -692,6 +696,9 @@ function OutputStep({
             </button>
           )}
         </div>
+        <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "4px 0 0" }}>
+          笔记将保存到此目录。推荐选云盘文件夹以实现跨设备同步
+        </p>
         {!config.output.note_dir && (
           <p style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>⚠️ 必须设置输出目录，否则无法保存生成的笔记</p>
         )}
