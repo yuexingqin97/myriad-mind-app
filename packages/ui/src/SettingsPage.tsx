@@ -613,27 +613,26 @@ function OutputTab({
   return (
     <>
       <SettingsSection title="笔记输出">
-        <Input
-          label="笔记输出目录 *"
-          value={config.output.note_dir}
-          placeholder="必填 — 例如: D:/Notes/MyriadMind"
-          hint="笔记将保存到此目录。选在云盘文件夹可跨设备同步"
-          onChange={(e) => update("output", { ...config.output, note_dir: e.target.value })}
-        />
-        {!config.output.note_dir && (
-          <p style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>⚠️ 必须设置输出目录，否则无法保存生成的笔记</p>
-        )}
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <Input
+              label="笔记输出目录 *"
+              value={config.output.note_dir}
+              placeholder="必填 — 例如: D:/Notes/MyriadMind"
+              hint="笔记将保存到此目录。选在云盘文件夹可跨设备同步"
+              onChange={(e) => update("output", { ...config.output, note_dir: e.target.value })}
+            />
+          </div>
           {onSelectDir && (
             <Button variant="secondary" onClick={async () => {
               const dir = await onSelectDir();
               if (dir) update("output", { ...config.output, note_dir: dir });
             }}>📁 选择目录</Button>
           )}
-          {onOpenDir && (
-            <Button variant="secondary" onClick={onOpenDir}>📂 打开目录</Button>
-          )}
         </div>
+        {!config.output.note_dir && (
+          <p style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>⚠️ 必须设置输出目录，否则无法保存生成的笔记</p>
+        )}
       </SettingsSection>
 
       <SettingsSection title="文件管理">
