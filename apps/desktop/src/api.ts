@@ -273,6 +273,12 @@ export async function runMindTask(request: MindRequestPayload): Promise<unknown>
   return { text: "# 模拟生成\n\n请在 Tauri 环境下运行。", provider: "deepseek", model: "mock" };
 }
 
+export async function pickFolder(): Promise<string | null> {
+  if (await ensureTauri()) return tauriInvoke!("pick_folder") as Promise<string | null>;
+  // Browser mock: return a fake path
+  return "D:/Notes/MyriadMind";
+}
+
 export async function testDeepSeekConnection(): Promise<string> {
   if (await ensureTauri()) return tauriInvoke!("test_deepseek_connection") as Promise<string>;
   return "pong — deepseek-v4-flash (browser mock)";

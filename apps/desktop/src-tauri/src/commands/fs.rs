@@ -156,3 +156,13 @@ pub async fn copy_asset(
 
     Ok(dest_path.to_string_lossy().to_string())
 }
+
+/// 打开系统原生文件夹选择对话框，返回选中路径
+#[tauri::command]
+pub async fn pick_folder() -> Result<Option<String>, AppError> {
+    let folder = rfd::AsyncFileDialog::new()
+        .pick_folder()
+        .await
+        .map(|handle| handle.path().to_string_lossy().to_string());
+    Ok(folder)
+}

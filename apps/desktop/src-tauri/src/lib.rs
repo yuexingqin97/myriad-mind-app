@@ -12,7 +12,7 @@ use commands::{
         read_keychain_entry, reset_config, store_keychain_entry, write_config,
     },
     deps::{detect_all_deps, detect_ffmpeg, detect_gpu, detect_python, detect_python_auto, detect_ytdlp},
-    fs::{cleanup_temp, copy_asset, read_text_file, scan_directory, write_note},
+    fs::{cleanup_temp, copy_asset, pick_folder, read_text_file, scan_directory, write_note},
     pipeline::execute_pipeline,
     python::{
         check_python_env, download_video, download_youtube_subtitles, extract_keyframes,
@@ -36,6 +36,7 @@ fn get_version() -> &'static str {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             // 基础
             health_check,
@@ -65,6 +66,7 @@ pub fn run() {
             list_ai_douyin_tasks,
             check_python_env,
             // 文件系统
+            pick_folder,
             scan_directory,
             read_text_file,
             write_note,

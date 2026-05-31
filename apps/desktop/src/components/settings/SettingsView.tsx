@@ -83,6 +83,8 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard, onNa
           keychain={keychainAdapter}
           deps={deps}
           onRecheckDeps={detectDeps}
+          onSelectOutputDir={async () => api.pickFolder()}
+          onOpenOutputDir={() => { /* TBD */ }}
         />
       ) : (
         <>
@@ -94,7 +96,7 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard, onNa
             deps={deps}
             onRecheckDeps={detectDeps}
             onOpenWizard={() => setShowWizard(true)}
-            onSelectOutputDir={async () => { /* TBD: Tauri dialog */ return null; }}
+            onSelectOutputDir={async () => api.pickFolder()}
             onOpenOutputDir={() => { /* TBD: open in explorer */ }}
             theme={theme}
             onThemeChange={setTheme}
