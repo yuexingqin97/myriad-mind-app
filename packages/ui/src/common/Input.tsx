@@ -1,175 +1,109 @@
 // ============================================================
-// Input — 通用表单组件 (CC Switch 暗色风格)
+// Input / Select / Toggle / Textarea — 通用表单组件
+// 纯 inline style，无 Tailwind 依赖
 // ============================================================
 
 import React from "react";
 
-const inputBase = [
-  "w-full px-3 py-2 text-sm rounded-lg border",
-  "bg-[#0f0f1a]",
-  "text-[#e0e0f0]",
-  "placeholder:text-gray-500",
-  "focus:outline-none focus:ring-2 focus:ring-offset-0",
-  "transition-colors duration-150",
-];
+const inputStyle: React.CSSProperties = {
+  width: "100%", padding: "8px 12px", fontSize: 13,
+  borderRadius: 8, border: "1px solid #2a2a4a",
+  background: "#0f0f1a", color: "#e0e0f0",
+  outline: "none", transition: "border-color 0.15s",
+};
 
-export interface InputProps
-  extends React.InputHTMLAttributes<HTMLInputElement> {
+export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
   hint?: string;
   icon?: React.ReactNode;
 }
 
-export function Input({
-  label,
-  error,
-  hint,
-  icon,
-  className = "",
-  id,
-  ...props
-}: InputProps) {
+export function Input({ label, error, hint, icon, id, className = "", ...props }: InputProps) {
   const inputId = id ?? (label ? label.toLowerCase().replace(/\s+/g, "-") : undefined);
-
   return (
-    <div className="flex flex-col gap-1.5">
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {label && (
-        <label
-          htmlFor={inputId}
-          className="text-xs font-medium text-[#a0a0c0] uppercase tracking-wide"
-        >
+        <label htmlFor={inputId} style={{ fontSize: 11, fontWeight: 600, color: "#a0a0c0", textTransform: "uppercase", letterSpacing: "0.05em" }}>
           {label}
         </label>
       )}
-      <div className="relative">
-        {icon && (
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
-            {icon}
-          </span>
-        )}
+      <div style={{ position: "relative" }}>
+        {icon && <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#666" }}>{icon}</span>}
         <input
           id={inputId}
-          className={[
-            ...inputBase,
-            error
-              ? "border-red-500/70 focus:ring-red-500/50"
-              : "border-[#2a2a4a] focus:border-indigo-500 focus:ring-indigo-500/40",
-            icon ? "pl-10" : "",
-            className,
-          ].join(" ")}
+          style={{
+            ...inputStyle,
+            borderColor: error ? "rgba(248,113,113,0.7)" : "#2a2a4a",
+            paddingLeft: icon ? 36 : 12,
+          }}
           {...props}
         />
       </div>
-      {error && <p className="text-xs text-red-400">{error}</p>}
-      {hint && !error && (
-        <p className="text-xs text-[#666]">{hint}</p>
-      )}
+      {error && <p style={{ fontSize: 11, color: "#f87171", margin: 0 }}>{error}</p>}
+      {hint && !error && <p style={{ fontSize: 11, color: "#666", margin: 0 }}>{hint}</p>}
     </div>
   );
 }
 
-export interface TextareaProps
-  extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
   error?: string;
 }
 
-export function Textarea({
-  label,
-  error,
-  className = "",
-  id,
-  ...props
-}: TextareaProps) {
+export function Textarea({ label, error, id, className = "", ...props }: TextareaProps) {
   const textareaId = id ?? (label ? label.toLowerCase().replace(/\s+/g, "-") : undefined);
-
   return (
-    <div className="flex flex-col gap-1.5">
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {label && (
-        <label
-          htmlFor={textareaId}
-          className="text-xs font-medium text-[#a0a0c0] uppercase tracking-wide"
-        >
+        <label htmlFor={textareaId} style={{ fontSize: 11, fontWeight: 600, color: "#a0a0c0", textTransform: "uppercase", letterSpacing: "0.05em" }}>
           {label}
         </label>
       )}
       <textarea
         id={textareaId}
-        className={[
-          ...inputBase,
-          "resize-vertical min-h-[80px]",
-          error
-            ? "border-red-500/70 focus:ring-red-500/50"
-            : "border-[#2a2a4a] focus:border-indigo-500 focus:ring-indigo-500/40",
-          className,
-        ].join(" ")}
+        style={{ ...inputStyle, resize: "vertical", minHeight: 80, borderColor: error ? "rgba(248,113,113,0.7)" : "#2a2a4a" }}
         {...props}
       />
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p style={{ fontSize: 11, color: "#f87171", margin: 0 }}>{error}</p>}
     </div>
   );
 }
 
-export interface SelectOption {
-  value: string;
-  label: string;
-}
+export interface SelectOption { value: string; label: string; }
 
-export interface SelectProps
-  extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "children"> {
+export interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "children"> {
   label?: string;
   options: SelectOption[];
   placeholder?: string;
   error?: string;
 }
 
-export function Select({
-  label,
-  options,
-  placeholder,
-  error,
-  className = "",
-  id,
-  ...props
-}: SelectProps) {
+export function Select({ label, options, placeholder, error, id, className = "", ...props }: SelectProps) {
   const selectId = id ?? (label ? label.toLowerCase().replace(/\s+/g, "-") : undefined);
-
   return (
-    <div className="flex flex-col gap-1.5">
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {label && (
-        <label
-          htmlFor={selectId}
-          className="text-xs font-medium text-[#a0a0c0] uppercase tracking-wide"
-        >
+        <label htmlFor={selectId} style={{ fontSize: 11, fontWeight: 600, color: "#a0a0c0", textTransform: "uppercase", letterSpacing: "0.05em" }}>
           {label}
         </label>
       )}
       <select
         id={selectId}
-        className={[
-          ...inputBase,
-          "cursor-pointer appearance-none",
-          "bg-[url('data:image/svg+xml;charset=utf-8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"12\" height=\"12\" fill=\"%23666\"><path d=\"M6 8L1 3h10z\"/></svg>')] bg-no-repeat bg-[right_10px_center]",
-          error
-            ? "border-red-500/70 focus:ring-red-500/50"
-            : "border-[#2a2a4a] focus:border-indigo-500 focus:ring-indigo-500/40",
-          className,
-        ].join(" ")}
+        style={{
+          ...inputStyle, cursor: "pointer",
+          appearance: "none",
+          backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23666'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E\")",
+          backgroundRepeat: "no-repeat", backgroundPosition: "right 10px center",
+          paddingRight: 28,
+          borderColor: error ? "rgba(248,113,113,0.7)" : "#2a2a4a",
+        }}
         {...props}
       >
-        {placeholder && (
-          <option value="" disabled>
-            {placeholder}
-          </option>
-        )}
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
+        {placeholder && <option value="" disabled>{placeholder}</option>}
+        {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
       </select>
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p style={{ fontSize: 11, color: "#f87171", margin: 0 }}>{error}</p>}
     </div>
   );
 }
@@ -182,45 +116,39 @@ export interface ToggleProps {
   disabled?: boolean;
 }
 
-export function Toggle({
-  label,
-  description,
-  checked,
-  onChange,
-  disabled = false,
-}: ToggleProps) {
+export function Toggle({ label, description, checked, onChange, disabled = false }: ToggleProps) {
   return (
-    <label
-      className={[
-        "flex items-center gap-3 py-2",
-        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
-      ].join(" ")}
-    >
+    <label style={{
+      display: "flex", alignItems: "flex-start", gap: 12, padding: "6px 0",
+      cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1,
+    }}>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         disabled={disabled}
-        className={[
-          "relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent",
-          "transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:ring-offset-2 focus:ring-offset-[#1a1a2e]",
-          checked ? "bg-indigo-600" : "bg-[#2a2a4a]",
-        ].join(" ")}
-        onClick={() => onChange(!checked)}
+        onClick={() => !disabled && onChange(!checked)}
+        style={{
+          position: "relative", display: "inline-flex",
+          height: 20, width: 36, flexShrink: 0,
+          borderRadius: 10, border: "2px solid transparent",
+          background: checked ? "#6366f1" : "#2a2a4a",
+          transition: "background 0.2s", outline: "none",
+          cursor: disabled ? "not-allowed" : "pointer",
+          marginTop: 2,
+        }}
       >
-        <span
-          className={[
-            "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0",
-            "transition duration-200",
-            checked ? "translate-x-4" : "translate-x-0",
-          ].join(" ")}
-        />
+        <span style={{
+          position: "absolute", top: 2,
+          display: "block", height: 16, width: 16, borderRadius: "50%",
+          background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+          transition: "left 0.2s",
+          left: checked ? 18 : 2,
+        }} />
       </button>
-      <div className="flex flex-col">
-        <span className="text-sm font-medium text-[#ccc]">{label}</span>
-        {description && (
-          <span className="text-xs text-[#666]">{description}</span>
-        )}
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: "#ccc" }}>{label}</span>
+        {description && <span style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{description}</span>}
       </div>
     </label>
   );

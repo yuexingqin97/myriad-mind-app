@@ -1,5 +1,5 @@
 // ============================================================
-// Button — 通用按钮组件
+// Button — 通用按钮组件 (纯 inline style，无 Tailwind)
 // ============================================================
 
 import React from "react";
@@ -7,28 +7,24 @@ import React from "react";
 export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 export type ButtonSize = "sm" | "md" | "lg";
 
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   loading?: boolean;
   icon?: React.ReactNode;
 }
 
-const variantStyles: Record<ButtonVariant, string> = {
-  primary:
-    "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700 focus:ring-indigo-400 shadow-sm shadow-indigo-900/30",
-  secondary:
-    "bg-gray-800 text-gray-200 hover:bg-gray-700 active:bg-gray-900 border border-gray-700 focus:ring-gray-500",
-  danger: "bg-red-600/90 text-white hover:bg-red-500 focus:ring-red-400 shadow-sm shadow-red-900/20",
-  ghost:
-    "bg-transparent text-gray-400 hover:text-gray-200 hover:bg-white/5 focus:ring-gray-500",
+const variantMap: Record<ButtonVariant, React.CSSProperties> = {
+  primary: { background: "#6366f1", color: "#fff", border: "none", boxShadow: "0 1px 4px rgba(99,102,241,0.3)" },
+  secondary: { background: "#1f2937", color: "#e5e7eb", border: "1px solid #374151" },
+  danger: { background: "rgba(239,68,68,0.9)", color: "#fff", border: "none", boxShadow: "0 1px 4px rgba(239,68,68,0.2)" },
+  ghost: { background: "transparent", color: "#9ca3af", border: "none" },
 };
 
-const sizeStyles: Record<ButtonSize, string> = {
-  sm: "px-2.5 py-1.5 text-xs rounded",
-  md: "px-4 py-2 text-sm rounded-md",
-  lg: "px-6 py-3 text-base rounded-lg",
+const sizeMap: Record<ButtonSize, React.CSSProperties> = {
+  sm: { padding: "6px 10px", fontSize: 11, borderRadius: 6 },
+  md: { padding: "8px 16px", fontSize: 13, borderRadius: 8 },
+  lg: { padding: "12px 24px", fontSize: 15, borderRadius: 10 },
 };
 
 export function Button({
@@ -43,14 +39,15 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      className={[
-        "inline-flex items-center justify-center gap-2 font-medium",
-        "transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0f0f1a]",
-        "disabled:opacity-50 disabled:cursor-not-allowed",
-        variantStyles[variant],
-        sizeStyles[size],
-        className,
-      ].join(" ")}
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+        fontWeight: 500, cursor: disabled || loading ? "not-allowed" : "pointer",
+        opacity: disabled || loading ? 0.5 : 1,
+        transition: "all 0.15s",
+        outline: "none",
+        ...variantMap[variant],
+        ...sizeMap[variant === "ghost" ? size : size],
+      }}
       disabled={disabled || loading}
       {...props}
     >
@@ -62,25 +59,9 @@ export function Button({
 
 function Spinner() {
   return (
-    <svg
-      className="animate-spin h-4 w-4"
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-      />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ animation: "spin 1s linear infinite" }}>
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity={0.25} />
+      <path fill="currentColor" opacity={0.75} d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>
   );
 }

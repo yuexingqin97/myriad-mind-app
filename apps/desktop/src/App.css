@@ -2,6 +2,11 @@
 /* 大衍决 Desktop — CC Switch 暗色风格                           */
 /* ============================================================ */
 
+/* Spinner animation for Button loading state */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 *,
 *::before,
 *::after {
