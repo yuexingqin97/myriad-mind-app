@@ -5,6 +5,7 @@ import * as api from "@/api";
 import type { DepResult } from "@/api";
 import { DepsPanel } from "@/components/settings/DepsPanel";
 import { useTheme } from "@/hooks/useTheme";
+import appIcon from "@/assets/icons/myriad-mind-whale-icon-concept.png";
 
 // ---- Props ----
 
@@ -88,6 +89,7 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard }: Se
             onOpenOutputDir={() => { /* TBD: open in explorer */ }}
             theme={theme}
             onThemeChange={setTheme}
+            appIcon={appIcon}
           />
         </>
       )}

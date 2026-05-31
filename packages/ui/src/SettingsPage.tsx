@@ -33,6 +33,8 @@ export interface SettingsPageProps {
   theme?: ThemeMode;
   /** 主题切换回调 */
   onThemeChange?: (theme: ThemeMode) => void;
+  /** App 图标 URL（关于页显示） */
+  appIcon?: string;
 }
 
 export interface KeychainApi {
@@ -68,6 +70,7 @@ export function SettingsPage({
   configPath,
   theme,
   onThemeChange,
+  appIcon,
 }: SettingsPageProps) {
   const [tab, setTab] = useState<TabId>("overview");
   const [config, setConfig] = useState<MyriadMindConfig>({ ...initialConfig });
@@ -187,7 +190,7 @@ export function SettingsPage({
           {tab === "output" && <OutputTab config={config} update={update} onSelectDir={onSelectOutputDir} onOpenDir={onOpenOutputDir} />}
           {tab === "features" && <FeaturesTab config={config} update={update} />}
           {tab === "advanced" && <AdvancedTab config={config} update={update} />}
-          {tab === "about" && <AboutTab />}
+          {tab === "about" && <AboutTab appIcon={appIcon} />}
         </div>
       </div>
 
@@ -681,12 +684,16 @@ function AdvancedTab({
 // 关于 Tab
 // ============================================================
 
-function AboutTab() {
+function AboutTab({ appIcon }: { appIcon?: string }) {
   return (
     <>
       <SettingsSection title="大衍决">
         <div style={{ textAlign: "center", padding: "20px 0" }}>
-          <span style={{ fontSize: 48 }}>🧘</span>
+          {appIcon ? (
+            <img src={appIcon} alt="大衍决" style={{ width: 64, height: 64, borderRadius: 14, objectFit: "cover" }} />
+          ) : (
+            <span style={{ fontSize: 48 }}>🧘</span>
+          )}
           <h2 style={{ fontSize: 20, fontWeight: 700, margin: "8px 0 4px", color: "var(--text, #e0e0f0)" }}>大衍决</h2>
           <p style={{ fontSize: 12, color: "var(--text-muted, #666)", marginBottom: 4 }}>Myriad Mind v0.1.0</p>
           <p style={{ fontSize: 12, color: "var(--text-secondary, #a0a0c0)" }}>神识一扫，万物皆可为笔记</p>
@@ -711,12 +718,26 @@ function AboutTab() {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="项目与联系">
+        <div style={{ fontSize: 12, color: "var(--text-secondary, #a0a0c0)", lineHeight: 2 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 14 }}>📦</span>
+            <span>GitHub：</span>
+            <a href="https://github.com/yuexingqin97/myriad-mind-app" target="_blank" rel="noopener noreferrer"
+              style={{ color: "var(--brand-primary, #1683ff)", textDecoration: "none" }}>
+              github.com/yuexingqin97/myriad-mind-app
+            </a>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 14 }}>💬</span>
+            <span>QQ：2410030025</span>
+          </div>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="开源协议">
         <p style={{ fontSize: 12, color: "var(--text-secondary, #a0a0c0)" }}>
           MIT License — 免费开源，保留上游版权声明。
-        </p>
-        <p style={{ fontSize: 11, color: "var(--text-muted, #666)", marginTop: 4 }}>
-          本工具仅供个人学习、研究和教育目的。
         </p>
       </SettingsSection>
 

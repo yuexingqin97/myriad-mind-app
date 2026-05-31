@@ -559,6 +559,268 @@ App 当前：
 
 # 五、开发优先级
 
+## 5.1 阶段提示词 Hook
+
+Skill 的优势之一是用户可以通过自然语言临时改变处理方式，例如：
+
+```text
+跳过评论区
+只看核心模块
+重点分析源码架构
+截图只保留代码画面
+术语表要中英对照
+最后给我一条学习路线
+```
+
+迁移到 App 后，不建议做 CodeWhale 那种完整生命周期 Hook 系统。第一版只需要做“阶段提示词 Hook”，让用户能在指定阶段追加自己的定制提示词。
+
+### Hook 定位
+
+这里的 Hook 本质是“用户自定义 Prompt Overlay”。
+
+它不执行代码，不调用外部工具，只参与 prompt 构建。
+
+```text
+内置阶段 Prompt
+  + 用户全局偏好
+  + 当前任务偏好
+  + 阶段 Hook
+  → BuiltPrompt
+  → MindEngine
+```
+
+### 支持的 Hook 阶段
+
+建议第一版支持这些阶段：
+
+| 阶段 | Hook ID | 作用 |
+|------|---------|------|
+| 输入预处理 | `input_prepare` | 指定处理重点、跳过范围、语言偏好 |
+| 灵力预估 | `estimation` | 自定义省流策略、深度策略 |
+| 字幕分析 | `transcript_analysis` | 指定关注的知识点、教程步骤、代码讲解 |
+| 截图规划 | `keyframe_planning` | 指定截图偏好，如只截代码、图表、操作步骤 |
+| 截图审查 | `keyframe_review` | 指定保留 / 跳过截图标准 |
+| 笔记生成 | `note_generation` | 定制笔记结构、语气、深度、章节 |
+| 术语表 | `glossary` | 指定术语格式，如中英对照、类比解释 |
+| 资源推荐 | `resources` | 指定资源类型，如官方文档优先、不要视频 |
+| 评论萃取 | `comments_digest` | 指定评论筛选标准 |
+| 代码分析 | `code_analysis` | 指定关注架构、性能、模块边界、阅读路线 |
+| 修为建议 | `next_step_suggestion` | 指定学习方向、推荐粒度 |
+
+### Hook 类型
+
+#### 全局 Hook
+
+长期生效，保存在设置里。
+
+示例：
+
+```text
+所有笔记都用中文输出。
+术语首次出现时保留英文原文。
+Mermaid 图尽量简洁，不要超过 12 个节点。
+扩展资源优先官方文档。
+```
+
+#### 阶段 Hook
+
+只对某个阶段生效。
+
+示例：
+
+```text
+keyframe_planning:
+只推荐出现代码、架构图、操作界面的时间点。
+不要推荐纯人物讲话画面。
+```
+
+#### 单次任务 Hook
+
+只对当前输入生效。
+
+示例：
+
+```text
+这次重点分析 Bevy ECS 的调度机制，弱化入门解释。
+```
+
+### 配置结构建议
+
+```ts
+prompt_hooks: {
+  global: string;
+
+  stages: Partial<Record<
+    | "input_prepare"
+    | "estimation"
+    | "transcript_analysis"
+    | "keyframe_planning"
+    | "keyframe_review"
+    | "note_generation"
+    | "glossary"
+    | "resources"
+    | "comments_digest"
+    | "code_analysis"
+    | "next_step_suggestion",
+    {
+      enabled: boolean;
+      prompt: string;
+    }
+  >>;
+}
+```
+
+单次任务 Hook 不进入配置文件，放在当前任务 state：
+
+```ts
+task_prompt_overlay?: string;
+stage_overrides?: Partial<Record<HookStage, string>>;
+```
+
+### Prompt 合并顺序
+
+Hook 合并需要有优先级，避免用户自定义覆盖安全规则。
+
+```text
+1. 系统安全规则 / 输出格式硬约束
+2. 阶段内置 Prompt
+3. 功能开关产生的约束
+4. 用户全局 Hook
+5. 用户阶段 Hook
+6. 单次任务 Hook
+```
+
+用户 Hook 可以改变风格、关注点、筛选标准，但不能覆盖：
+
+- 不泄露 API Key。
+- 不伪造来源。
+- 不把 reasoning_content 当正文。
+- 不跳过必要错误提示。
+- 不绕过用户确认。
+
+### UI 设计
+
+设置页新增：
+
+```text
+提示词定制
+
+[ 全局偏好 ]
+所有笔记通用的写作偏好。
+
+[ 阶段定制 ]
+输入预处理
+字幕分析
+截图规划
+截图审查
+笔记生成
+代码分析
+修为建议
+```
+
+炼化页在输入区增加一个“本次要求”折叠区：
+
+```text
+本次要求（可选）
+[ 这次重点分析源码架构，截图只保留代码画面…… ]
+```
+
+高级用户可以展开“阶段定制”：
+
+```text
+截图规划：
+[ 只截代码、架构图和参数面板，不截人物讲话。 ]
+
+笔记生成：
+[ 详细解释设计取舍，并在每节末尾加实践建议。 ]
+```
+
+### 示例
+
+#### 示例 1：教程视频
+
+用户输入：
+
+```text
+本次要求：这是操作教程，请重点保留每一步操作画面。
+```
+
+生成 Hook：
+
+```text
+transcript_analysis:
+优先识别“点击、选择、打开、配置、运行、报错、修复”等操作步骤。
+
+keyframe_planning:
+优先推荐操作步骤发生后的 1-3 秒截图。
+
+note_generation:
+输出一个“操作流程”章节，每一步带时间戳和截图。
+```
+
+#### 示例 2：代码项目分析
+
+用户输入：
+
+```text
+重点讲架构，不要逐文件流水账。
+```
+
+生成 Hook：
+
+```text
+code_analysis:
+优先说明模块边界、核心数据流、关键抽象和扩展点。
+弱化普通文件列表。
+```
+
+#### 示例 3：省流模式
+
+用户输入：
+
+```text
+只要速览，跳过评论区和截图。
+```
+
+转换为：
+
+```text
+features.comments = false
+features.keyframes = false
+note_generation hook:
+只输出摘要、核心概念、术语表和推荐阅读顺序。
+```
+
+### 开发优先级
+
+P0：
+
+- 炼化页“本次要求”文本框。
+- `note_generation` Hook。
+- Prompt Builder 合并 Hook。
+
+P1：
+
+- 设置页“全局偏好”。
+- `keyframe_planning`、`keyframe_review` Hook。
+- `code_analysis` Hook。
+
+P2：
+
+- 阶段 Hook 管理 UI。
+- Hook 模板库。
+- 按输入类型自动推荐 Hook。
+
+### 验收标准
+
+- 用户可以在炼化前填写“本次要求”。
+- 本次要求会进入最终 AI prompt。
+- 用户可以配置全局写作偏好。
+- 阶段 Hook 不会覆盖系统硬约束。
+- 生成笔记的元信息中可以记录使用了哪些 Hook。
+
+---
+
 ## P0：把核心炼化闭环跑通
 
 目标：
@@ -697,4 +959,3 @@ App 当前：
 - 每个管线步骤有事件、输入、输出、错误。
 - Python 脚本作为黑盒复用，但 Rust 层做类型化封装。
 - Prompt 在 `packages/core/src/prompts` 统一维护。
-
