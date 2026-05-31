@@ -272,14 +272,18 @@ function DepsStep({ deps, onRecheck }: { deps?: DepsInfo; onRecheck?: () => void
 // Step 2: Keys — API 密钥 (保留现有逻辑)
 // ============================================================
 
-const KEY_DEFS: Array<{
+// ---- AI 模型提供商 ----
+
+const AI_PROVIDERS = [
+  { id: "deepseek", label: "DeepSeek", desc: "V4 Pro / Flash · 1M 上下文 · 主力模型", available: true },
+  { id: "claude", label: "Claude", desc: "Anthropic · 待后续版本支持", available: false },
+] as const;
+
+// ---- 视频/ASR 密钥 ----
+
+const SERVICE_KEYS: Array<{
   service: string; label: string; description: string; placeholder: string; required: boolean;
 }> = [
-  {
-    service: "claude-api-key", label: "Claude API Key（可选）",
-    description: "Anthropic 控制台 → API Keys。v2 备用方案，当前主力为 DeepSeek V4 Pro",
-    placeholder: "sk-ant-api03-...", required: false,
-  },
   {
     service: "ai-douyin-api-key", label: "AI Douyin API Key",
     description: "抖音/B 站/小红书视频解析。aidouyin.com 注册获取",
@@ -295,23 +299,80 @@ const KEY_DEFS: Array<{
     description: "云端 ASR 后端。火山引擎控制台 → 语音技术 → 获取 Token",
     placeholder: "输入火山引擎 Token...", required: false,
   },
-  {
-    service: "deepseek-api-key", label: "DeepSeek API Key",
-    description: "AI 笔记生成主力模型。platform.deepseek.com → API Keys",
-    placeholder: "sk-...", required: true,
-  },
 ];
 
 function ApiKeysStep({ keychain }: { keychain?: KeychainApi }) {
   return (
-    <div>
-      <p style={{ fontSize: 13, color: "var(--text-secondary, #a0a0c0)", marginBottom: 16, lineHeight: 1.6 }}>
-        所有密钥存储在 OS 密钥链（Windows 凭据管理器），绝不明文落盘。DeepSeek API Key 为必填项，其余按需配置。
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {KEY_DEFS.map((def) => (
-          <ApiKeyField key={def.service} {...def} keychain={keychain} />
-        ))}
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* AI 模型选择 */}
+      <div>
+        <h4 style={{ fontSize: 14, fontWeight: 600, color: "var(--text, #e0e0f0)", marginBottom: 4 }}>
+          🤖 AI 模型
+        </h4>
+        <p style={{ fontSize: 12, color: "var(--text-muted, #666)", marginBottom: 12 }}>
+          选择笔记生成使用的 AI 模型，后续将支持更多提供商
+        </p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          {AI_PROVIDERS.map((p) => (
+            <div
+              key={p.id}
+              title={!p.available ? "后续版本支持" : undefined}
+              style={{
+                flex: 1, padding: "12px 14px", borderRadius: 10,
+                border: p.id === "deepseek" ? "2px solid #1683ff" : "1px solid var(--border, #2a2a4a)",
+                background: p.id === "deepseek" ? "rgba(22,131,255,0.08)" : "var(--bg-surface, #1a1a2e)",
+                opacity: p.available ? 1 : 0.4,
+                cursor: p.available ? "default" : "not-allowed",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 14, color: p.available ? "var(--text, #e0e0f0)" : "var(--text-muted, #666)" }}>
+                  {p.label}
+                </span>
+                {p.id === "deepseek" && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(22,131,255,0.15)", color: "#1683ff" }}>当前</span>}
+                {!p.available && <span style={{ fontSize: 10, color: "var(--text-muted, #666)" }}>即将支持</span>}
+              </div>
+              <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "4px 0 0" }}>{p.desc}</p>
+            </div>
+          ))}
+        </div>
+        {/* DeepSeek API Key */}
+        <ApiKeyField
+          service="deepseek-api-key"
+          label="DeepSeek API Key"
+          description="platform.deepseek.com → API Keys · 必填"
+          placeholder="sk-..."
+          required
+          keychain={keychain}
+        />
+        {/* Claude API Key (hidden for now, keep keychain entry) */}
+        <div style={{ marginTop: 8 }}>
+          <details style={{ fontSize: 12, color: "var(--text-muted, #666)" }}>
+            <summary style={{ cursor: "pointer" }}>Claude API Key（可选 · 后续版本）</summary>
+            <div style={{ marginTop: 8 }}>
+              <ApiKeyField
+                service="claude-api-key"
+                label="Claude API Key"
+                description="Anthropic 控制台 → API Keys · v2 备用方案"
+                placeholder="sk-ant-api03-..."
+                required={false}
+                keychain={keychain}
+              />
+            </div>
+          </details>
+        </div>
+      </div>
+
+      {/* 视频/ASR 密钥 */}
+      <div>
+        <h4 style={{ fontSize: 14, fontWeight: 600, color: "var(--text, #e0e0f0)", marginBottom: 12 }}>
+          📡 视频解析 & ASR 服务
+        </h4>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {SERVICE_KEYS.map((def) => (
+            <ApiKeyField key={def.service} {...def} keychain={keychain} />
+          ))}
+        </div>
       </div>
     </div>
   );

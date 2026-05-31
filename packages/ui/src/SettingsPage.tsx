@@ -340,26 +340,70 @@ function OverviewTab({
 // API 密钥 Tab
 // ============================================================
 
-const KEY_DEFS: Array<{ service: string; label: string; desc: string; placeholder: string; required: boolean }> = [
-  { service: "claude-api-key",  label: "Claude API Key（可选）", desc: "Anthropic 控制台 → API Keys。v2 备用，当前主力为 DeepSeek", placeholder: "sk-ant-api03-...", required: false },
-  { service: "ai-douyin-api-key", label: "AI Douyin API Key", desc: "抖音/B 站/小红书视频解析。aidouyin.com 注册获取",        placeholder: "输入 Key...",       required: false },
-  { service: "tikhub-token",     label: "TikHub Token",       desc: "视频解析备用方案。tikhub.io 注册获取",                    placeholder: "输入 Token...",     required: false },
-  { service: "volcengine-token", label: "火山引擎 Token",     desc: "云端 ASR 后端 Token",                                     placeholder: "输入 Token...",     required: false },
-  { service: "deepseek-api-key",  label: "DeepSeek API Key",   desc: "AI 笔记生成主力模型。platform.deepseek.com → API Keys",      placeholder: "sk-...",            required: true },
-];
-
 function KeysTab({ keychain }: { keychain?: KeychainApi }) {
   return (
-    <SettingsSection title="API 密钥管理">
-      <p style={{ fontSize: 12, color: "var(--text-muted, #666)", marginBottom: 16, lineHeight: 1.6 }}>
-        所有密钥存储在 OS 密钥链（Windows 凭据管理器），绝不明文落盘。DeepSeek API Key 为必填项。
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {KEY_DEFS.map((def) => (
-          <KeyField key={def.service} {...def} keychain={keychain} />
-        ))}
-      </div>
-    </SettingsSection>
+    <>
+      <SettingsSection title="🤖 AI 模型">
+        <p style={{ fontSize: 12, color: "var(--text-muted, #666)", marginBottom: 12 }}>
+          选择笔记生成使用的 AI 模型，密钥存储在 OS 密钥链中
+        </p>
+
+        {/* Model selector */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {[
+            { id: "deepseek", label: "DeepSeek", available: true },
+            { id: "claude", label: "Claude", available: false },
+          ].map((p) => (
+            <div
+              key={p.id}
+              style={{
+                flex: 1, padding: "10px 14px", borderRadius: 10,
+                border: p.id === "deepseek" ? "2px solid #1683ff" : "1px solid var(--border, #2a2a4a)",
+                background: p.id === "deepseek" ? "rgba(22,131,255,0.06)" : "var(--bg-surface, #1a1a2e)",
+                opacity: p.available ? 1 : 0.4,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text, #e0e0f0)" }}>{p.label}</span>
+                {p.id === "deepseek" && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(22,131,255,0.15)", color: "#1683ff" }}>当前</span>}
+                {!p.available && <span style={{ fontSize: 10, color: "var(--text-muted, #666)" }}>即将支持</span>}
+              </div>
+              <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "2px 0 0" }}>
+                {p.id === "deepseek" ? "V4 Pro / Flash · 1M 上下文" : "Anthropic · 后续版本"}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <KeyField
+          service="deepseek-api-key" label="DeepSeek API Key"
+          desc="platform.deepseek.com → API Keys · 必填"
+          placeholder="sk-..." required keychain={keychain}
+        />
+
+        <details style={{ fontSize: 12, color: "var(--text-muted, #666)", marginTop: 12 }}>
+          <summary style={{ cursor: "pointer" }}>Claude API Key（可选 · 后续版本）</summary>
+          <div style={{ marginTop: 8 }}>
+            <KeyField
+              service="claude-api-key" label="Claude API Key"
+              desc="Anthropic 控制台 → API Keys · v2 备用" placeholder="sk-ant-api03-..."
+              required={false} keychain={keychain}
+            />
+          </div>
+        </details>
+      </SettingsSection>
+
+      <SettingsSection title="📡 视频解析 & ASR 服务">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <KeyField service="ai-douyin-api-key" label="AI Douyin API Key"
+            desc="抖音/B 站/小红书视频解析。aidouyin.com 注册获取" placeholder="输入 Key..." required={false} keychain={keychain} />
+          <KeyField service="tikhub-token" label="TikHub Token"
+            desc="视频解析备用方案。tikhub.io 注册获取" placeholder="输入 Token..." required={false} keychain={keychain} />
+          <KeyField service="volcengine-token" label="火山引擎 Token"
+            desc="云端 ASR 后端 Token" placeholder="输入 Token..." required={false} keychain={keychain} />
+        </div>
+      </SettingsSection>
+    </>
   );
 }
 
