@@ -156,3 +156,44 @@ pub async fn pick_folder() -> Result<Option<String>, AppError> {
         .map(|handle| handle.path().to_string_lossy().to_string());
     Ok(folder)
 }
+
+/// 获取缓存目录路径（不创建）
+#[tauri::command]
+pub fn get_cache_dir() -> String {
+    std::env::temp_dir()
+        .join("myriad-mind")
+        .to_string_lossy()
+        .to_string()
+}
+
+/// 在系统文件管理器中打开缓存目录
+#[tauri::command]
+pub fn open_cache_dir() -> Result<(), AppError> {
+    let cache_dir = std::env::temp_dir().join("myriad-mind");
+    // 确保目录存在
+    std::fs::create_dir_all(&cache_dir).map_err(AppError::Io)?;
+
+    let path_str = cache_dir.to_string_lossy().to_string();
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| AppError::Other(format!("无法打开目录: {e}")))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| AppError::Other(format!("无法打开目录: {e}")))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| AppError::Other(format!("无法打开目录: {e}")))?;
+    }
+    Ok(())
+}

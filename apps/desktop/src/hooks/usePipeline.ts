@@ -144,7 +144,7 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
 
   const logIdRef = useRef(0);
   const streamAccumRef = useRef("");
-  const streamChunkRef = useRef(0);
+  const streamChunkedRef = useRef(0); // chars already pushed to logs
   const pipelineCancelRef = useRef<(() => void) | null>(null);
   const aiStartRef = useRef(0);
   const lastUsageRef = useRef<{ inputTokens?: number; outputTokens?: number; totalTokens?: number }>({});
@@ -191,7 +191,7 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
     setProgress(0);
     setStreamingText("");
     streamAccumRef.current = "";
-    streamChunkRef.current = 0;
+    streamChunkedRef.current = 0;
 
     // Reset logs for new run
     logIdRef.current = 0;
@@ -240,23 +240,34 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
       });
 
       // Listen for mind-stream (DeepSeek unified events)
+      const AI_CHUNK_SIZE = 2000; // 每积累 2000 字符推一条日志
       unlistenStream = api.listenMindStream((event) => {
         switch (event.type) {
           case "start":
             aiStartRef.current = Date.now();
             lastUsageRef.current = {};
+            streamAccumRef.current = "";
+            streamChunkedRef.current = 0;
             pushLog("step", `🤖 AI 开始生成 · ${event.model ?? ""}`);
             pushLog("divider", "");
             break;
           case "delta": {
             streamAccumRef.current += (event.delta ?? "");
-            setStreamingText(streamAccumRef.current);
-            // 每 ~2000 字符刷一个分块到日志（降低渲染频率）
-            const len = streamAccumRef.current.length;
-            const lastChunkLen = streamChunkRef.current;
-            if (len - lastChunkLen >= 2000) {
-              pushLog("output", streamAccumRef.current.slice(lastChunkLen));
-              streamChunkRef.current = len;
+            const unlogged = streamAccumRef.current.length - streamChunkedRef.current;
+            // 积累足够字符后推一条日志归档
+            if (unlogged >= AI_CHUNK_SIZE) {
+              const chunk = streamAccumRef.current.slice(streamChunkedRef.current);
+              pushLog("output", chunk);
+              streamChunkedRef.current = streamAccumRef.current.length;
+              // streamingText 显示当前未归档部分
+              setStreamingText(
+                streamAccumRef.current.slice(streamChunkedRef.current)
+              );
+            } else {
+              // streamingText 只显示未归档的增量
+              setStreamingText(
+                streamAccumRef.current.slice(streamChunkedRef.current)
+              );
             }
             break;
           }
@@ -269,20 +280,22 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
               outputTokens: event.output_tokens,
               totalTokens: event.total_tokens,
             };
-            pushLog("info", `📊 Token · input: ${event.input_tokens ?? "?"}  output: ${event.output_tokens ?? "?"}  total: ${event.total_tokens ?? "?"}`);
             break;
           case "done": {
-            // 推送剩余文本
-            const remaining = streamAccumRef.current.slice(streamChunkRef.current);
-            if (remaining) pushLog("output", remaining);
+            // 归档剩余未归档文本
+            const remaining = streamAccumRef.current.slice(streamChunkedRef.current);
+            if (remaining) {
+              pushLog("output", remaining);
+            }
+            const totalChars = streamAccumRef.current.length;
             const elapsed = ((Date.now() - aiStartRef.current) / 1000).toFixed(1);
             const u = lastUsageRef.current;
-            const summaryParts = [`共 ${streamAccumRef.current.length} 字符`, `⏱️ ${elapsed}s`];
+            const summaryParts = [`共 ${totalChars} 字符`, `⏱️ ${elapsed}s`];
             if (u.totalTokens) summaryParts.push(`📊 ${(u.totalTokens / 1000).toFixed(1)}K tokens`);
             pushLog("divider", "");
             pushLog("success", `✅ 笔记生成完成 · ${summaryParts.join(" · ")}`);
             streamAccumRef.current = "";
-            streamChunkRef.current = 0;
+            streamChunkedRef.current = 0;
             setStreamingText("");
             setProgress(100);
             finishPipeline();

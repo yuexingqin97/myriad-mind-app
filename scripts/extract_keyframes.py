@@ -77,6 +77,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--scene-threshold",
+        type=float,
+        default=float(env_or_default("KF_SCENE_THRESHOLD", "0.25") or "0.25"),
+        help="Scene change detection sensitivity (0.05-1.0). Lower = more sensitive. Default: 0.25.",
+    )
+    parser.add_argument(
+        "--max-gap",
+        type=int,
+        default=int(env_or_default("KF_MAX_GAP", "120") or "120"),
+        help="Max seconds without a frame before forcing a fallback shot. Default: 120.",
+    )
+    parser.add_argument(
+        "--min-gap",
+        type=int,
+        default=int(env_or_default("KF_MIN_GAP", "3") or "3"),
+        help="Minimum seconds between consecutive frames (dedup). Default: 3.",
+    )
+    parser.add_argument(
         "--timestamps",
         help=(
             "Optional JSON file of guided timestamps. Accepts an array of "
@@ -277,40 +295,83 @@ def extract_scene_frames(
     max_frames: int,
     ffmpeg_bin: str,
     threshold: float = 0.12,
+    min_gap: float = 3.0,
+    max_gap: float = 120.0,
 ) -> list[Keyframe]:
-    """Extract frames at scene changes."""
+    """Extract frames at scene changes with accurate timestamps.
+
+    Two-pass approach:
+    1. Detect scene changes via ffmpeg select+showinfo, output to null, parse
+       pts_time from stderr.
+    2. Extract one frame at each detected timestamp (reuse guided-extraction
+       pattern so timestamps are always exact).
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    filter_v = f"select=gt(scene\\,{threshold})"
-    pattern = str(output_dir / "scene_%04d.png")
+    # ---- Pass 1: detect scene-change pts_time values ----
+    null_dev = "NUL" if sys.platform == "win32" else "/dev/null"
+    filter_v = f"select=gt(scene\\,{threshold}),showinfo"
 
-    cmd = [
-        ffmpeg_bin,
-        "-i", str(video_path),
-        "-vf", filter_v,
-        "-vsync", "vfr",
-        "-frames:v", str(max_frames),
-        "-q:v", "2",
-        "-y",
-        pattern,
-    ]
+    result = subprocess.run(
+        [
+            ffmpeg_bin,
+            "-i", str(video_path),
+            "-vf", filter_v,
+            "-vsync", "vfr",
+            "-f", "null",
+            "-y",
+            null_dev,
+        ],
+        capture_output=True,
+        text=True,
+    )
 
-    subprocess.run(cmd, check=True, capture_output=True)
+    # Parse pts_time from stderr lines: "pts_time:123.456"
+    pts_times: list[float] = []
+    for line in result.stderr.splitlines():
+        m = re.search(r"pts_time:([\d.]+)", line)
+        if m:
+            pts_times.append(float(m.group(1)))
 
-    # We need to get timestamps from ffprobe for scene frames
+    if not pts_times:
+        return []  # no scene changes detected
+
+    # Deduplicate: enforce min_gap between consecutive timestamps
+    deduped: list[float] = []
+    last_ts = -min_gap - 1.0
+    for pts in pts_times:
+        if pts - last_ts < min_gap:
+            continue
+        deduped.append(pts)
+        last_ts = pts
+
+    # Limit to max_frames
+    timestamps = deduped[:max_frames]
+
+    # ---- Pass 2: extract one frame per timestamp ----
     keyframes: list[Keyframe] = []
-    for i, png in enumerate(sorted(output_dir.glob("scene_*.png")), start=1):
-        # Estimate timestamp from frame number (rough)
-        # For accurate timestamps we'd need to parse ffmpeg output
-        ts = float(i * 10)
-        keyframes.append(
-            Keyframe(
-                file=png.name,
-                timestamp_seconds=ts,
-                timestamp_label=timestamp_label(ts),
-                trigger="scene",
+    for index, ts in enumerate(timestamps, start=1):
+        safe_tag = f"{ts:.1f}s".replace(".", "_")
+        output = output_dir / f"scene_{index:04d}_{safe_tag}.png"
+        cmd = [
+            ffmpeg_bin,
+            "-ss", f"{ts:.3f}",
+            "-i", str(video_path),
+            "-frames:v", "1",
+            "-q:v", "2",
+            "-y",
+            str(output),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        if output.exists():
+            keyframes.append(
+                Keyframe(
+                    file=output.name,
+                    timestamp_seconds=ts,
+                    timestamp_label=timestamp_label(ts),
+                    trigger="scene",
+                )
             )
-        )
 
     return keyframes
 
@@ -322,6 +383,9 @@ def extract_keyframes(
     interval: int,
     max_frames: int,
     timestamps_path: str | None = None,
+    scene_threshold: float = 0.25,
+    min_gap: float = 3.0,
+    max_gap: float = 120.0,
 ) -> ExtractResult:
     """Main extraction logic."""
     ffmpeg_bin = find_ffmpeg()
@@ -347,9 +411,9 @@ def extract_keyframes(
 
     if mode in ("scene", "both"):
         scene_max = max_frames if mode == "scene" else max(max_frames // 3, 5)
-        threshold = float(env_or_default("KF_SCENE_THRESHOLD", "0.12") or "0.12")
         scene_frames = extract_scene_frames(
-            video_path, frames_dir, scene_max, ffmpeg_bin, threshold
+            video_path, frames_dir, scene_max, ffmpeg_bin, scene_threshold,
+            min_gap=min_gap, max_gap=max_gap,
         )
         all_keyframes.extend(scene_frames)
 
@@ -403,6 +467,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             interval=args.interval,
             max_frames=args.max_frames,
             timestamps_path=args.timestamps,
+            scene_threshold=args.scene_threshold,
+            min_gap=args.min_gap,
+            max_gap=args.max_gap,
         )
     except Exception as exc:  # pragma: no cover - CLI error handling
         print(f"ERROR: {exc}", file=sys.stderr)

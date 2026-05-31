@@ -85,9 +85,10 @@ export interface FeaturesConfig {
 }
 
 export interface KeyframesConfig {
-  interval: number; // 5-300 秒
-  max_frames: number; // 1-200
-  mode: "interval" | "scene" | "both";
+  max_frames: number;       // 1-200
+  scene_threshold: number;  // 0.05-1.0, 场景变化检测灵敏度
+  max_gap: number;          // 10-300 秒, 最长无变化间隔
+  min_gap: number;          // 1-30 秒, 最短帧间距
 }
 
 export interface OutputConfig {
@@ -105,6 +106,10 @@ export interface PostProcessConfig {
 export interface MyriadMindConfig {
   version: 1;
   python_path?: string; // Python 解释器路径（如 C:/python/python.exe），留空自动探测
+  /** DeepSeek API Key — 也支持环境变量 DEEPSEEK_API_KEY */
+  deepseek_api_key?: string;
+  /** AI Douyin API Key — B站/抖音/小红书视频解析 */
+  ai_douyin_api_key?: string;
   asr: ASRConfig;
   video: VideoConfig;
   features: FeaturesConfig;

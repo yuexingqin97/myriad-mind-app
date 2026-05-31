@@ -2191,6 +2191,7 @@ name = "myriad-mind-desktop"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "dom_query",
  "dotenvy",
  "log",
  "reqwest 0.12.28",

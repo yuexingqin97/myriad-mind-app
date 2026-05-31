@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useCallback } from "react";
 
 // ---- Log entry types ----
 
@@ -25,7 +25,7 @@ const TYPE_STYLES: Record<LogEntryType, React.CSSProperties> = {
 const TYPE_PREFIX: Record<LogEntryType, string> = {
   info:    "ℹ",
   step:    "▶",
-  output:  " ",
+  output:  "",
   success: "✔",
   error:   "✖",
   divider: "─",
@@ -43,10 +43,22 @@ interface LogPanelProps {
 
 export function LogPanel({ entries, streamingText }: LogPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const userScrolledRef = useRef(false);
 
+  // 检测用户是否主动上滚（距底部 > 50px 视为用户在查看历史）
+  const handleScroll = useCallback(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    userScrolledRef.current = !atBottom;
+  }, []);
+
+  // 仅当用户没有主动上滚时才自动滚底
   useEffect(() => {
-    // auto scroll — instant, no animation queuing
-    bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    if (!userScrolledRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    }
   }, [entries, streamingText]);
 
   return (
@@ -56,7 +68,7 @@ export function LogPanel({ entries, streamingText }: LogPanelProps) {
         <span className="log-panel-badge">{entries.length} 行</span>
       </div>
 
-      <div className="log-panel-body">
+      <div className="log-panel-body" ref={bodyRef} onScroll={handleScroll}>
         {entries.length === 0 && !streamingText && (
           <div className="log-empty">
             等待炼化…<br />
@@ -88,7 +100,6 @@ export function LogPanel({ entries, streamingText }: LogPanelProps) {
         {/* Streaming AI output — live text */}
         {streamingText && (
           <div className="log-line log-line-output log-streaming">
-            <span className="log-ts">{formatTime(Date.now())}</span>
             <span className="log-prefix">✦</span>
             <span style={{ color: "#d4b8ff" }}>
               {streamingText}

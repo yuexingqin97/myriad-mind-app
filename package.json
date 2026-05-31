@@ -3,7 +3,9 @@
   "private": true,
   "description": "大衍决 — 神识一扫，万物皆可为笔记",
   "scripts": {
-    "dev:desktop": "pnpm -F @myriad-mind/desktop dev",
+    "dev": "pnpm dev:desktop",
+    "dev:desktop": "pnpm -F @myriad-mind/desktop tauri dev",
+    "dev:desktop:web": "pnpm -F @myriad-mind/desktop dev",
     "dev:mobile": "pnpm -F @myriad-mind/mobile start",
     "build": "pnpm -r run build",
     "build:core": "pnpm -F @myriad-mind/core build",

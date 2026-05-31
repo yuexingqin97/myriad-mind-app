@@ -15,113 +15,87 @@ interface DepsPanelProps {
 export function DepsPanel({ pythonPath }: DepsPanelProps) {
   const [deps, setDeps] = useState<Record<string, DepResult>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
         const all = await api.detectAllDeps(pythonPath || undefined);
         setDeps(all);
-      } catch (e) {
-        setError(String(e));
+      } catch {
+        // 检测失败时保持空结果，面板用灰色展示"未检测"
       } finally {
         setLoading(false);
       }
     })();
   }, [pythonPath]);
 
-  if (loading) {
-    return (
-      <div style={{ padding: 12, fontSize: 12, color: "var(--text-muted)" }}>
-        🔍 正在检测系统依赖…
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={{ padding: 12, fontSize: 12, color: "#f87171" }}>
-        ⚠️ 依赖检测失败: {error}
-      </div>
-    );
-  }
+  // 固定的 5 项依赖列表 — 始终渲染，加载中/失败时用灰色状态
+  const ALL_DEPS = [
+    { key: "python", label: "Python" },
+    { key: "ffmpeg", label: "FFmpeg" },
+    { key: "faster-whisper", label: "faster-whisper" },
+    { key: "yt-dlp", label: "yt-dlp" },
+    { key: "gpu", label: "GPU/CUDA" },
+  ] as const;
 
   const entries = Object.entries(deps);
-  if (entries.length === 0) return null;
-
-  const allOk = entries.every(([, d]) => d.found);
+  const allOk = entries.length > 0 && entries.every(([, d]) => d.found);
 
   return (
     <div
       style={{
-        marginBottom: 20,
-        padding: 14,
-        borderRadius: 10,
+        marginBottom: 12,
+        padding: "6px 10px",
+        borderRadius: 6,
         background: "var(--bg-surface)",
-        border: `1px solid ${allOk ? "rgba(74,222,128,0.3)" : "rgba(250,204,21,0.3)"}`,
+        border: `1px solid ${
+          loading ? "var(--border-default)"
+          : allOk ? "rgba(74,222,128,0.25)"
+          : "rgba(250,204,21,0.25)"
+        }`,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 10,
-        }}
-      >
-        <h4
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: "var(--text-secondary)",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            margin: 0,
-          }}
-        >
-          🔧 系统依赖
-        </h4>
-        <span
-          style={{
-            fontSize: 11,
-            color: allOk ? "#4ade80" : "#facc15",
-          }}
-        >
-          {allOk ? "✅ 全部就绪" : "⚠️ 部分缺失"}
-        </span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+        🔧 系统依赖
+      </span>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", flex: 1 }}>
+        {ALL_DEPS.map(({ key, label }) => {
+          const dep = deps[key];
+          return (
+            <DepBadge
+              key={key}
+              name={label}
+              found={dep?.found}
+              version={dep?.version}
+              loading={loading}
+            />
+          );
+        })}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 6 }}>
-        {entries.map(([key, dep]) => (
-          <DepBadge key={key} name={dep.name} found={dep.found} version={dep.version} suggestion={dep.suggestion} />
-        ))}
-      </div>
+
+      <span style={{ fontSize: 10, color: loading ? "var(--text-muted)" : allOk ? "#4ade80" : "#facc15", whiteSpace: "nowrap" }}>
+        {loading ? "⏳ 检测中…" : allOk ? "✅" : "⚠️"}
+      </span>
     </div>
   );
 }
 
 function DepBadge({
-  name, found, version, suggestion,
-}: { name: string; found: boolean; version?: string; suggestion?: string }) {
+  name, found, version, loading,
+}: { name: string; found?: boolean; version?: string; loading?: boolean }) {
+  const ok = found === true;
+  const unknown = found === undefined || loading;
+  const icon = unknown ? "⏳" : ok ? "✅" : "⚠️";
+  const color = unknown ? "var(--text-muted)" : ok ? "#4ade80" : "#facc15";
+
   return (
-    <div
-      title={suggestion}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "6px 10px",
-        borderRadius: 6,
-        fontSize: 11,
-        background: found ? "rgba(74,222,128,0.08)" : "rgba(250,204,21,0.08)",
-        border: `1px solid ${found ? "rgba(74,222,128,0.2)" : "rgba(250,204,21,0.2)"}`,
-        color: found ? "#4ade80" : "#facc15",
-      }}
-    >
-      <span>{found ? "✅" : "⚠️"}</span>
-      <span style={{ fontWeight: 500 }}>{name}</span>
-      {version && (
-        <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{version}</span>
-      )}
-    </div>
+    <span style={{ fontSize: 11, color, whiteSpace: "nowrap" }}>
+      {icon} {name}
+      {version && <span style={{ color: "var(--text-muted)", fontSize: 9, marginLeft: 2 }}> {version}</span>}
+    </span>
   );
 }

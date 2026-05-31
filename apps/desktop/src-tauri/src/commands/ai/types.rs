@@ -137,6 +137,7 @@ pub enum MindStreamEvent {
         text: String,
         finish_reason: Option<String>,
     },
+    #[allow(dead_code)]
     #[serde(rename = "error")]
     Error {
         code: String,
@@ -147,6 +148,7 @@ pub enum MindStreamEvent {
 
 // ---- 错误分类 ----
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub enum AiErrorKind {
     Authentication,
@@ -177,6 +179,7 @@ impl AiErrorKind {
         }
     }
 
+    #[allow(dead_code)]
     pub fn user_message(kind: &str) -> &str {
         match kind {
             "authentication" => "DeepSeek API Key 无效，请重新配置",

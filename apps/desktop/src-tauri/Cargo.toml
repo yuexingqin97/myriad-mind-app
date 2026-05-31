@@ -28,6 +28,7 @@ rfd = "0.15"
 log = "0.4"
 simple-logging = "2"
 base64 = "0.22"
+dom_query = "0.27"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [

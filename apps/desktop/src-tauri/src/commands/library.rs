@@ -1,6 +1,7 @@
 // ============================================================
 // 输出目录知识库索引 — .myriad-mind/ 管理
 // P0: ensure, scan, placement, update
+#![allow(dead_code)] // 预留规划功能，暂未全部接入
 // ============================================================
 
 use serde::{Deserialize, Serialize};
@@ -244,7 +245,7 @@ pub fn update_library_after_save(
     source_type: &str,
     fingerprint: &str,
     note_id: &str,
-    note_content: &str,
+    _note_content: &str,
 ) {
     let lib_dir = lib_path(base_dir);
     let _ = std::fs::create_dir_all(&lib_dir);

@@ -51,9 +51,10 @@ export const FeaturesSchema = z.object({
 });
 
 export const KeyframesSchema = z.object({
-  interval: z.number().min(5).max(300).default(30),
-  max_frames: z.number().min(1).max(200).default(50),
-  mode: z.enum(["interval", "scene", "both"]).default("interval"),
+  max_frames: z.number().min(1).max(200).default(40),
+  scene_threshold: z.number().min(0.05).max(1.0).default(0.25),
+  max_gap: z.number().min(10).max(300).default(120),
+  min_gap: z.number().min(1).max(30).default(3),
 });
 
 export const OutputSchema = z.object({
@@ -71,6 +72,8 @@ export const PostProcessSchema = z.object({
 export const ConfigSchema = z.object({
   version: z.literal(1),
   python_path: z.string().optional().default(""),
+  deepseek_api_key: z.string().optional().default(""),
+  ai_douyin_api_key: z.string().optional().default(""),
   asr: ASRSchema,
   video: VideoSchema,
   features: FeaturesSchema,
@@ -87,6 +90,8 @@ export type MyriadMindConfig = z.infer<typeof ConfigSchema>;
 export const DEFAULT_CONFIG: MyriadMindConfig = {
   version: 1,
   python_path: "", // 留空 = 自动探测系统 Python
+  deepseek_api_key: "",
+  ai_douyin_api_key: "",
   asr: {
     backend: "faster-whisper",
     faster_whisper: {
@@ -114,9 +119,10 @@ export const DEFAULT_CONFIG: MyriadMindConfig = {
     tutorial_detection: true,
   },
   keyframes: {
-    interval: 30,
-    max_frames: 50,
-    mode: "interval",
+    max_frames: 40,
+    scene_threshold: 0.25,
+    max_gap: 120,
+    min_gap: 3,
   },
   output: {
     note_dir: "",

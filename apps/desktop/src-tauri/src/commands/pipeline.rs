@@ -145,6 +145,7 @@ pub async fn execute_pipeline(
             run_text_pipeline(
                 &app,
                 &input,
+                &input_mode,
                 &note_dir,
                 note_category.as_deref(),
                 task_prompt.as_deref(),
@@ -296,21 +297,47 @@ async fn run_video_pipeline(
         mode,
         InputMode::Bilibili | InputMode::Youtube | InputMode::Douyin | InputMode::Xiaohongshu
     ) {
-        let optional_download = matches!(mode, InputMode::Youtube) && !text_content.is_empty();
-        let download_label = if optional_download {
-            "📥 下载视频用于关键帧（可选）"
-        } else {
-            "📥 下载视频"
-        };
-        emit_progress(
-            app,
-            "download",
-            download_label,
-            18.0,
-            "running",
-            Some(&format!("平台: {mode}")),
-        );
-        match download_video_ytdlp(python_path, input, mode, &video_path) {
+        let is_bilibili = matches!(mode, InputMode::Bilibili);
+    let is_douyin_or_xhs = matches!(mode, InputMode::Douyin | InputMode::Xiaohongshu);
+    let optional_download = matches!(mode, InputMode::Youtube) && !text_content.is_empty();
+    emit_progress(
+        app,
+        "download",
+        "📥 下载视频",
+        18.0,
+        "running",
+        Some(&format!("平台: {mode}")),
+    );
+
+    let download_result = if is_douyin_or_xhs {
+        // 抖音 / 小红书 → 必须走 AI Douyin API
+        download_douyin_video(python_path, input, &video_path, &temp_dir).await
+            .map_err(|e| {
+                log::warn!("[pipeline] douyin download failed: {e}");
+                e
+            })
+    } else if is_bilibili {
+        // B站 → 优先 AI Douyin，Key 没配或失败则回退 yt-dlp
+        match download_douyin_video(python_path, input, &video_path, &temp_dir).await {
+            Ok(title) => Ok(title),
+            Err(e) => {
+                let msg = e.to_string();
+                log::error!("[pipeline] bilibili: AI Douyin 失败，回退 yt-dlp: {msg}");
+                emit_progress(
+                    app, "download",
+                    "⚠️ AI Douyin 失败，回退 yt-dlp",
+                    18.0, "running",
+                    Some(&msg),
+                );
+                download_video_ytdlp(python_path, input, mode, &video_path)
+            }
+        }
+    } else {
+        // YouTube → yt-dlp
+        download_video_ytdlp(python_path, input, mode, &video_path)
+    };
+
+        match download_result {
             Ok(title) => {
                 if video_title.is_empty() {
                     video_title = title;
@@ -764,12 +791,6 @@ async fn run_video_pipeline(
     // ---- AI 笔记生成 ----
     let source_url = if is_online_video(mode) { input } else { "" };
     let platform_name = mode.to_string();
-    if review_table.is_empty() && frames_dir.exists() {
-        let copied = copy_frame_assets(&frames_dir, note_dir, &video_id, 15);
-        if copied > 0 {
-            log::info!("[pipeline] copied {copied} fallback screenshots to assets/{video_id}");
-        }
-    }
 
     let dur_display = if video_duration > 0.0 {
         format!(
@@ -815,7 +836,7 @@ async fn run_video_pipeline(
         ai_input.push_str(&format!("## 字幕文本\n\n{text_content}\n\n---\n"));
     }
 
-    // 注入截图审查结果
+    // 注入截图审查结果（仅 AI 审查通过的截图）
     if !review_table.is_empty() {
         ai_input.push_str(&format!(
             "\n## 截图审查结果\n\n以下截图已通过 AI 审查，请按审查表中标注的嵌入位置放置截图。\n\
@@ -829,12 +850,6 @@ async fn run_video_pipeline(
                 source_url
             },
             review_table = review_table,
-        ));
-    } else if frames_dir.exists() {
-        ai_input.push_str(&format!(
-            "\n## 截图素材\n\n所有截图存放在 assets/{video_id}/ 目录中。\
-             请筛选有价值的截图嵌入笔记对应知识点旁边。\
-             跳过纯人脸、黑屏、过渡画面。每张截图配可点击时间戳。\n\n"
         ));
     }
 
@@ -975,63 +990,101 @@ async fn run_audio_pipeline(
 async fn run_text_pipeline(
     app: &AppHandle,
     input: &str,
+    input_mode: &InputMode,
     note_dir: &str,
     note_category: Option<&str>,
     task_prompt: Option<&str>,
     debug_metadata: bool,
 ) -> Result<(), AppError> {
-    emit_progress(app, "read", "读取内容", 15.0, "running", None);
-
-    let text = if input.starts_with("http") {
-        emit_progress(app, "fetch", "🌐 抓取网页内容", 20.0, "running", None);
-        // TODO: WebFetch (reqwest + HTML 提取)
-        emit_progress(
-            app,
-            "fetch",
-            "⚠️ 网页抓取尚未实现",
-            25.0,
-            "completed",
-            Some("当前版本仅支持本地文件，网页抓取即将支持"),
-        );
-        "（网页内容待抓取）".to_string()
-    } else {
-        emit_progress(
-            app,
-            "read",
-            "📂 读取本地文件",
-            10.0,
-            "running",
-            Some(&format!("路径: {input}")),
-        );
-        let content = std::fs::read_to_string(input).unwrap_or_else(|_| "（无法读取）".to_string());
-        let detail = format!("读取完成 · {} 字符", content.len());
-        emit_progress(
-            app,
-            "read",
-            &detail,
-            30.0,
-            "completed",
-            Some("内容已加载，准备送入 AI 分析"),
-        );
-        content
+    // ============================================================
+    // Phase 1: 读取/抓取内容
+    // ============================================================
+    let (content_for_ai, content_type) = match input_mode {
+        InputMode::CodeProject => {
+            // 代码项目 → 目录扫描
+            emit_progress(app, "scan", "📂 扫描代码项目", 15.0, "running", Some(input));
+            let root = std::path::Path::new(input);
+            let scan = crate::commands::code_project::scan_code_project(root, 3)?;
+            let detail = format!(
+                "{} 文件 · {} KB · {} · {}",
+                scan.total_files,
+                scan.total_size_bytes / 1024,
+                scan.size_label,
+                scan.tech_stack.join(", ")
+            );
+            emit_progress(app, "scan", &detail, 30.0, "completed", None);
+            let ai_content = crate::commands::code_project::format_code_project_for_ai(&scan);
+            (ai_content, "代码项目".to_string())
+        }
+        InputMode::ArticleUrl => {
+            // 在线文章 → HTTP 抓取
+            emit_progress(app, "fetch", "🌐 抓取网页内容", 15.0, "running", Some(input));
+            match crate::commands::fetch::fetch_article(input).await {
+                Ok(article) => {
+                    let platform = &article.platform;
+                    let lang = &article.language_hint;
+                    let detail = format!(
+                        "✅ 已抓取 · {} · {} · {} 字符",
+                        platform,
+                        lang,
+                        article.body_text.len()
+                    );
+                    emit_progress(app, "fetch", &detail, 30.0, "completed", None);
+                    let ai_content = crate::commands::fetch::format_article_for_ai(&article);
+                    (ai_content, "网页文章".to_string())
+                }
+                Err(e) => {
+                    emit_progress(
+                        app,
+                        "fetch",
+                        &format!("❌ 抓取失败: {e}"),
+                        25.0,
+                        "failed",
+                        Some("请尝试将页面另存为 HTML 文件，或直接粘贴文章内容"),
+                    );
+                    return Err(e);
+                }
+            }
+        }
+        InputMode::LocalText => {
+            // 本地文件 → 直接读取
+            emit_progress(
+                app,
+                "read",
+                "📂 读取本地文件",
+                10.0,
+                "running",
+                Some(&format!("路径: {input}")),
+            );
+            let content =
+                std::fs::read_to_string(input).unwrap_or_else(|_| "（无法读取）".to_string());
+            let detail = format!("读取完成 · {} 字符", content.len());
+            emit_progress(
+                app,
+                "read",
+                &detail,
+                30.0,
+                "completed",
+                Some("内容已加载，准备送入 AI 分析"),
+            );
+            let ct = detect_content_type(&content);
+            (content, ct.to_string())
+        }
+        _ => unreachable!(),
     };
 
-    emit_progress(app, "classify", "🔍 分析内容类型", 35.0, "running", None);
-    let content_type = if text.contains("```") || text.contains("fn ") || text.contains("class ") {
-        "代码"
-    } else if text.len() < 500 {
-        "短文"
-    } else {
-        "文本"
-    };
     emit_progress(
         app,
         "classify",
-        &format!("内容类型: {content_type}"),
-        40.0,
+        &format!("🔍 内容类型: {content_type}"),
+        35.0,
         "completed",
         None,
     );
+
+    // ============================================================
+    // Phase 2: 知识库索引 + 指纹去重
+    // ============================================================
 
     // 确保 .myriad-mind/ 索引存在
     let lib_dir = std::path::PathBuf::from(note_dir).join(".myriad-mind");
@@ -1040,7 +1093,7 @@ async fn run_text_pipeline(
         app,
         "library",
         "📚 检查知识库索引",
-        42.0,
+        38.0,
         "running",
         if is_new_lib {
             Some("首次使用此输出目录，正在建立索引…")
@@ -1056,21 +1109,14 @@ async fn run_text_pipeline(
             } else {
                 Some("索引就绪".into())
             };
-            emit_progress(
-                app,
-                "library",
-                "索引就绪",
-                45.0,
-                "completed",
-                detail.as_deref(),
-            );
+            emit_progress(app, "library", "索引就绪", 40.0, "completed", detail.as_deref());
         }
         Err(e) => {
             emit_progress(
                 app,
                 "library",
                 &format!("索引建立失败: {e}"),
-                45.0,
+                40.0,
                 "completed",
                 None,
             );
@@ -1087,11 +1133,15 @@ async fn run_text_pipeline(
             app,
             "generate_note",
             &format!("🔁 命中已有笔记: {}", existing.path),
-            48.0,
+            42.0,
             "running",
             Some("检测到此输入曾炼化过，将基于已有笔记增量更新"),
         );
     }
+
+    // ============================================================
+    // Phase 3: AI 生成笔记
+    // ============================================================
 
     emit_progress(
         app,
@@ -1099,29 +1149,31 @@ async fn run_text_pipeline(
         "🤖 AI 生成笔记 (DeepSeek V4 Pro)",
         50.0,
         "running",
-        Some("正在调用 AI 模型，流式输出中…"),
+        Some(&format!("内容类型: {content_type}")),
     );
 
     // 准备增强上下文
     let enhanced_content = if let Some(ref existing) = existing_note {
         format!(
             "## 已有笔记（请在此基础上更新）\n\n{}\n\n---\n\n## 本次新增材料\n\n{}",
-            existing.content, text
+            existing.content, content_for_ai
         )
     } else {
-        text.clone()
+        content_for_ai.clone()
     };
 
-    // 调用 MindEngine (DeepSeek V4 Pro)
-    let ai_task_hint = if is_update {
-        "更新已有笔记"
+    // content_type 传给 generate_note 用于选择提示词分支
+    let final_content_type = if is_update {
+        // 更新模式：保留原 content_type 但标记为更新
+        format!("更新·{}", content_type)
     } else {
-        "生成新笔记"
+        content_type.clone()
     };
+
     match ai::generate_note(
         app,
         &enhanced_content,
-        ai_task_hint,
+        &final_content_type,
         Some(note_dir),
         task_prompt,
     )
@@ -1133,6 +1185,8 @@ async fn run_text_pipeline(
             // 自动分类并保存
             let source_type = if input.starts_with("http") {
                 "article"
+            } else if std::path::Path::new(input).is_dir() {
+                "code_project"
             } else {
                 "file"
             };
@@ -1206,6 +1260,28 @@ async fn run_text_pipeline(
 // 工具函数
 // ============================================================
 
+/// 内容类型检测 — 5 信号启发式（仅用于 LocalText 模式）
+fn detect_content_type(text: &str) -> &'static str {
+    let has_code_fences = text.contains("```");
+    let has_fn = text.contains("fn ") || text.contains("function ");
+    let has_class = text.contains("class ") || text.contains("impl ") || text.contains("struct ");
+    let has_import = text.contains("import ") || text.contains("use ") || text.contains("#include");
+    let has_pub = text.contains("pub fn") || text.contains("export ") || text.contains("def ");
+
+    let code_signals = [has_code_fences, has_fn, has_class, has_import, has_pub]
+        .iter()
+        .filter(|&&x| x)
+        .count();
+
+    if code_signals >= 2 {
+        "代码"
+    } else if text.len() < 500 {
+        "短文"
+    } else {
+        "文档"
+    }
+}
+
 fn emit_progress(
     app: &AppHandle,
     step: &str,
@@ -1276,39 +1352,8 @@ fn count_md_files(dir: &str) -> usize {
     count
 }
 
-fn copy_frame_assets(
-    frames_dir: &std::path::Path,
-    note_dir: &str,
-    video_id: &str,
-    max_files: usize,
-) -> usize {
-    let assets_dir = PathBuf::from(note_dir).join("assets").join(video_id);
-    if std::fs::create_dir_all(&assets_dir).is_err() {
-        return 0;
-    }
-
-    let mut copied = 0;
-    if let Ok(entries) = std::fs::read_dir(frames_dir) {
-        let mut frames: Vec<PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().map(|ext| ext == "png").unwrap_or(false))
-            .collect();
-        frames.sort();
-
-        for src in frames.into_iter().take(max_files) {
-            if let Some(file_name) = src.file_name() {
-                let dst = assets_dir.join(file_name);
-                if std::fs::copy(&src, dst).is_ok() {
-                    copied += 1;
-                }
-            }
-        }
-    }
-    copied
-}
-
 /// 追问笔记：读取已有笔记 → AI 回答 → 追加到问答记录
+#[allow(dead_code)]
 #[tauri::command]
 pub async fn execute_qa(
     app: AppHandle,
@@ -1679,6 +1724,126 @@ fn fetch_video_metadata(python_path: &str, url: &str) -> Option<(String, String,
     Some((title, author, duration))
 }
 
+/// 调用 AI Douyin API 解析视频 URL，把响应 JSON 写入临时文件并返回路径
+/// B站/抖音/小红书 走此路径；YouTube 直接用 yt-dlp
+async fn resolve_via_ai_douyin(video_url: &str, temp_dir: &std::path::Path) -> Result<PathBuf, AppError> {
+    // 读取 AI Douyin API Key（优先级：配置文件 > OS 密钥链）
+    let douyin_key = if let Some(key) = crate::commands::config::read_config_value("ai_douyin_api_key") {
+        log::info!("[douyin] found api key in config file (len={})", key.len());
+        key
+    } else {
+        match crate::commands::config::cred_read("ai-douyin-api-key") {
+            Ok(Some(k)) if !k.is_empty() => {
+                log::info!("[douyin] found api key in credential manager (len={})", k.len());
+                k
+            }
+            _ => {
+                log::warn!("[douyin] key not found in config file or credential manager");
+                return Err(AppError::Ai {
+                    kind: "provider_not_configured".into(),
+                    message: "未配置 AI Douyin API Key。请在设置 → API 密钥 中配置，或在配置文件 myriad-mind-config.json 中添加 ai_douyin_api_key 字段。aidouyin.com 注册获取免费额度。".into(),
+                });
+            }
+        }
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("https://ai-douyin.top9.cc/api/v1/video/download-url")
+        .header("X-API-Key", &douyin_key)
+        .json(&serde_json::json!({"url": video_url}))
+        .send()
+        .await
+        .map_err(|e| AppError::Config(format!("AI Douyin API 请求失败: {e}")))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AppError::Config(format!(
+            "AI Douyin API 返回 {status}: {body}"
+        )));
+    }
+
+    let json: serde_json::Value = resp.json().await.map_err(|e| {
+        AppError::Config(format!("AI Douyin API 响应解析失败: {e}"))
+    })?;
+
+    // 打印完整响应结构便于调试
+    log::info!("[douyin] API response keys: {:?}", json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    log::info!("[douyin] API response: {}", serde_json::to_string(&json).unwrap_or_default());
+
+    let json_path = temp_dir.join("download_url.json");
+    std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap_or_default())
+        .map_err(AppError::Io)?;
+
+    log::info!(
+        "[douyin] resolved video URL → {}",
+        json_path.display()
+    );
+    Ok(json_path)
+}
+
+/// 通过 AI Douyin API 解析 → download_video_candidates.py 下载视频
+/// B站/抖音/小红书 使用
+async fn download_douyin_video(
+    python_path: &str,
+    video_url: &str,
+    output: &std::path::Path,
+    temp_dir: &std::path::Path,
+) -> Result<String, AppError> {
+    // 读取 Key（resolve_via_ai_douyin 内部也会读，这里需要再读一次传给脚本）
+    let douyin_key = crate::commands::config::read_config_value("ai_douyin_api_key")
+        .or_else(|| crate::commands::config::cred_read("ai-douyin-api-key").ok().flatten())
+        .unwrap_or_default();
+
+    let json_path = resolve_via_ai_douyin(video_url, temp_dir).await?;
+
+    let output_str = output.to_string_lossy().to_string();
+    let json_str = json_path.to_string_lossy().to_string();
+    log::info!("[douyin] download_video_candidates.py: {json_str} → {output_str}");
+
+    let mut args: Vec<String> = vec![
+        "--response-json".into(), json_str,
+        "--output".into(), output_str,
+    ];
+    if !douyin_key.is_empty() {
+        args.push("--api-key".into());
+        args.push(douyin_key);
+    }
+
+    let result = crate::commands::python::run_python_script(
+        python_path,
+        "download_video_candidates.py",
+        &args,
+    )
+    .await?;
+
+    if !result.success {
+        return Err(AppError::PythonScript {
+            script: "download_video_candidates.py".into(),
+            stderr: result.stderr,
+        });
+    }
+
+    // Try to extract title from the API response (re-read from file)
+    let title = if let Ok(json_str) = std::fs::read_to_string(&json_path) {
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            data.get("title")
+                .or_else(|| data.get("desc"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("抖音视频")
+                .to_string()
+        } else {
+            "抖音视频".to_string()
+        }
+    } else {
+        "抖音视频".to_string()
+    };
+
+    log::info!("[douyin] download complete: {title}");
+    Ok(title)
+}
+
 /// Download video using yt-dlp
 fn download_video_ytdlp(
     python_path: &str,
@@ -1693,10 +1858,6 @@ fn download_video_ytdlp(
     apply_windows_no_window(&mut cmd);
     cmd.args(prefix_args);
     cmd.args([
-        "-f",
-        "bestvideo+bestaudio/best",
-        "--merge-output-format",
-        "mp4",
         "-o",
         &output_str,
         "--print",
@@ -1722,6 +1883,18 @@ fn download_video_ytdlp(
         .trim()
         .to_string();
     log::info!("[download] title: {title}");
+
+    // 校验文件是否真的存在（yt-dlp 可能合并失败但仍返回 0）
+    if !media_file_ready(output) {
+        log::error!(
+            "[download] yt-dlp 返回成功但文件不存在: {} ({} bytes?)",
+            output.display(),
+            output.metadata().map(|m| m.len()).unwrap_or(0)
+        );
+        return Err(AppError::Config(
+            "yt-dlp 返回成功但视频文件未生成，可能是音视频合并失败。请确认 FFmpeg 已安装并加入 PATH。".into(),
+        ));
+    }
     Ok(title)
 }
 
@@ -1867,6 +2040,7 @@ fn transcribe_with_python(
 }
 
 /// 调用 extract_keyframes.py（支持可选的引导时间点），返回截图输出目录
+/// 只使用 smart 模式：字幕引导时间点 + 场景变化检测，不使用固定间隔
 fn extract_keyframes_guided(
     python_path: &str,
     video: &PathBuf,
@@ -1884,6 +2058,17 @@ fn extract_keyframes_guided(
         video.to_string_lossy().to_string(),
         "--output-dir".into(),
         output_dir.to_string_lossy().to_string(),
+        // 强制 scene 模式（不使用固定间隔）
+        "--mode".into(),
+        "scene".into(),
+        "--max-frames".into(),
+        "40".into(),
+        "--scene-threshold".into(),
+        "0.25".into(),
+        "--max-gap".into(),
+        "120".into(),
+        "--min-gap".into(),
+        "3".into(),
     ];
 
     if let Some(ts_path) = guided_timestamps {

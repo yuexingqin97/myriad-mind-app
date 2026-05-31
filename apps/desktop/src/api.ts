@@ -282,6 +282,19 @@ export async function pickFolder(): Promise<string | null> {
   return "D:/Notes/MyriadMind";
 }
 
+export async function getCacheDir(): Promise<string> {
+  if (await ensureTauri()) return tauriInvoke!("get_cache_dir") as Promise<string>;
+  return "（浏览器 mock）";
+}
+
+export async function openCacheDir(): Promise<void> {
+  if (await ensureTauri()) {
+    await tauriInvoke!("open_cache_dir");
+    return;
+  }
+  console.warn("[myriad-mind] open_cache_dir 仅在 Tauri 环境中可用");
+}
+
 export async function executeQa(notePath: string, question: string, writeBack: boolean): Promise<string> {
   if (await ensureTauri()) return tauriInvoke!("execute_qa", { notePath, question, writeBack }) as Promise<string>;
   return "（浏览器模拟）基于笔记内容的回答...";

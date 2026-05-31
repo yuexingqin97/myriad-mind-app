@@ -790,42 +790,30 @@ function FeaturesStep({
         {config.features.keyframes && (
           <div style={{ marginTop: 12, marginLeft: 4, paddingLeft: 12, borderLeft: "2px solid var(--border, #2a2a4a)" }}>
             <Input
-              label="截图间隔（秒）"
-              type="number" min={5} max={300}
-              value={config.keyframes.interval}
+              label="最大截图数"
+              type="number" min={5} max={100}
+              value={config.keyframes.max_frames}
               onChange={(e) => update("keyframes", {
                 ...config.keyframes,
-                interval: Math.max(5, Math.min(300, Number(e.target.value) || 30)),
+                max_frames: Math.max(5, Math.min(100, Number(e.target.value) || 40)),
               })}
-              hint="每隔 N 秒截一帧，范围 5-300"
+              hint="候选截图上限，AI 审查后仅保留高分帧"
             />
             <div style={{ marginTop: 10 }}>
               <Input
-                label="最大截图数"
-                type="number" min={1} max={200}
-                value={config.keyframes.max_frames}
+                label="场景检测灵敏度"
+                type="number" min={0.05} max={1.0} step={0.05}
+                value={config.keyframes.scene_threshold}
                 onChange={(e) => update("keyframes", {
                   ...config.keyframes,
-                  max_frames: Math.max(1, Math.min(200, Number(e.target.value) || 50)),
+                  scene_threshold: Math.max(0.05, Math.min(1.0, Number(e.target.value) || 0.25)),
                 })}
-                hint="超过此数不再截取，范围 1-200"
+                hint="阈值越低越灵敏（更多帧），范围 0.05-1.0"
               />
             </div>
-            <div style={{ marginTop: 10 }}>
-              <Select
-                label="截图模式"
-                options={[
-                  { value: "interval", label: "固定间隔 — 每 N 秒截一张" },
-                  { value: "scene", label: "场景检测 — 画面变化时截取" },
-                  { value: "both", label: "两者结合 — 推荐" },
-                ]}
-                value={config.keyframes.mode}
-                onChange={(e) => update("keyframes", {
-                  ...config.keyframes,
-                  mode: e.target.value as "interval" | "scene" | "both",
-                })}
-              />
-            </div>
+            <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "8px 0 0" }}>
+              截图方式：AI 字幕分析推荐时间点 + 场景变化检测，仅 AI 视觉审查通过的截图进入笔记
+            </p>
           </div>
         )}
       </div>

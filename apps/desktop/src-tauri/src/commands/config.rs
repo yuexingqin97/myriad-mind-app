@@ -61,6 +61,18 @@ pub fn is_first_launch() -> bool {
     !config_file().exists()
 }
 
+/// 从配置文件中读取一个字符串字段（用于读取 API Key 等）
+pub fn read_config_value(key: &str) -> Option<String> {
+    let path = config_file();
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    json.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 /// 读取配置（无文件时返回空对象）
 #[tauri::command]
 pub async fn read_config() -> Result<String, AppError> {

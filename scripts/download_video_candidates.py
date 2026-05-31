@@ -54,16 +54,21 @@ def download_first_working_candidate(
     *,
     opener: Callable[..., Any] = urllib.request.urlopen,
     timeout: int = 30,
+    api_key: str | None = None,
 ) -> str:
     errors: list[str] = []
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    headers = {"User-Agent": USER_AGENT}
+    if api_key:
+        headers["X-API-Key"] = api_key
 
     for index, candidate in enumerate(candidates, 1):
         partial_path = output_path.with_suffix(output_path.suffix + ".part")
         if partial_path.exists():
             partial_path.unlink()
 
-        request = urllib.request.Request(candidate, headers={"User-Agent": USER_AGENT})
+        request = urllib.request.Request(candidate, headers=headers)
         try:
             print(f"Trying candidate {index}: {describe_candidate(candidate)}", file=sys.stderr)
             with opener(request, timeout=timeout) as response:
@@ -88,6 +93,7 @@ def main() -> int:
     parser.add_argument("--response-json", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument("--api-key", type=str, default=None)
     args = parser.parse_args()
 
     response = json.loads(args.response_json.read_text(encoding="utf-8"))
@@ -100,6 +106,7 @@ def main() -> int:
         candidates,
         args.output,
         timeout=args.timeout,
+        api_key=args.api_key,
     )
     print(
         json.dumps(

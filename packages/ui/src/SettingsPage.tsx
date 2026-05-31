@@ -3,11 +3,11 @@
 // 顶部健康度卡片 + 左侧导航 + 右侧内容
 // ============================================================
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import type { MyriadMindConfig } from "@myriad-mind/core";
 import { Input, Select, Toggle } from "./common/Input.js";
 import { Button } from "./common/Button.js";
-import type { DepsInfo, HealthStatus } from "./types.js";
+import type { DepsInfo } from "./types.js";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -27,6 +27,8 @@ export interface SettingsPageProps {
   onSelectOutputDir?: () => Promise<string | null>;
   /** 打开输出目录 */
   onOpenOutputDir?: () => void;
+  /** 打开缓存目录 */
+  onOpenCacheDir?: () => void;
   /** config.json 路径 */
   configPath?: string;
   /** 当前主题 */
@@ -69,6 +71,7 @@ export function SettingsPage({
   onResetConfig,
   onSelectOutputDir,
   onOpenOutputDir,
+  onOpenCacheDir,
   configPath,
   theme,
   onThemeChange,
@@ -92,93 +95,8 @@ export function SettingsPage({
 
   // ---- Health status derivation ----
 
-  const healthItems = React.useMemo(() => {
-    const items: Array<{ label: string; icon: string; status: HealthStatus; detail: string }> = [];
-
-    // AI Key — check if any AI provider key is configured
-    items.push({
-      label: "AI 模型", icon: "🧠",
-      status: keychain ? "ok" : "unconfigured",
-      detail: keychain ? "已连接密钥链" : "开发模式",
-    });
-
-    // Python
-    if (deps?.python) {
-      items.push({
-        label: "Python", icon: "🐍",
-        status: deps.python.found ? "ok" : "error",
-        detail: deps.python.version ?? (deps.python.found ? "就绪" : "未安装"),
-      });
-    } else {
-      items.push({ label: "Python", icon: "🐍", status: "unconfigured", detail: "未检测" });
-    }
-
-    if (deps?.fasterWhisper) {
-      items.push({
-        label: "ASR", icon: "🎙️",
-        status: deps.fasterWhisper.found ? "ok" : "error",
-        detail: deps.fasterWhisper.version ?? (deps.fasterWhisper.found ? "就绪" : "未安装"),
-      });
-    } else {
-      items.push({ label: "ASR", icon: "🎙️", status: "unconfigured", detail: "未检测" });
-    }
-
-    // FFmpeg
-    if (deps?.ffmpeg) {
-      items.push({
-        label: "FFmpeg", icon: "🎞️",
-        status: deps.ffmpeg.found ? "ok" : "warning",
-        detail: deps.ffmpeg.version ?? (deps.ffmpeg.found ? "就绪" : "未安装"),
-      });
-    } else {
-      items.push({ label: "FFmpeg", icon: "🎞️", status: "unconfigured", detail: "未检测" });
-    }
-
-    // 输出目录
-    items.push({
-      label: "输出目录", icon: "📂",
-      status: config.output.note_dir ? "ok" : "unconfigured",
-      detail: config.output.note_dir || "使用默认目录",
-    });
-
-    return items;
-  }, [keychain, deps, config.output.note_dir]);
-
-  const allOk = healthItems.every((h) => h.status === "ok");
-  const hasError = healthItems.some((h) => h.status === "error");
-
-  const healthStatusColor = (s: HealthStatus) =>
-    s === "ok" ? "#4ade80" : s === "warning" ? "#facc15" : s === "error" ? "#f87171" : "var(--text-muted, #666)";
-
   return (
-    <div className="settings-page-full">
-      {/* ---- 配置健康度 ---- */}
-      <div className="settings-health">
-        <div className="settings-health-cards">
-          {healthItems.map((h) => (
-            <div key={h.label} className="settings-health-card" style={{
-              borderColor: h.status === "ok" ? "rgba(74,222,128,0.3)" : h.status === "warning" ? "rgba(250,204,21,0.3)" : h.status === "error" ? "rgba(248,113,113,0.3)" : "rgba(42,42,74,0.5)",
-            }}>
-              <span style={{ fontSize: 20 }}>{h.icon}</span>
-              <div>
-                <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text, #e0e0f0)" }}>{h.label}</span>
-                <span style={{ marginLeft: 6, fontSize: 11, color: healthStatusColor(h.status) }}>
-                  {h.status === "ok" ? "✅" : h.status === "warning" ? "⚠️" : h.status === "error" ? "❌" : "⚪"}
-                </span>
-              </div>
-              <span style={{ fontSize: 11, color: "var(--text-muted, #666)", marginLeft: "auto" }}>{h.detail}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ fontSize: 12, marginTop: 10, padding: "0 4px", color: hasError ? "#f87171" : allOk ? "#4ade80" : "#facc15" }}>
-          {allOk
-            ? "✅ 全部核心能力已就绪，可处理文章、视频和本地文件。"
-            : hasError
-              ? "❌ 核心能力缺失 — 还缺 AI API Key 或 Python，暂时无法生成笔记。"
-              : "⚠️ 部分能力可用 — 文章处理可用，视频处理可能受限。"}
-        </div>
-      </div>
-
+    <div className="settings-page-full" style={{ position: "relative" }}>
       {/* ---- 双栏布局 ---- */}
       <div className="settings-dual-layout">
         {/* 左侧导航 */}
@@ -197,23 +115,26 @@ export function SettingsPage({
 
         {/* 右侧内容 */}
         <div className="settings-content-right">
-          {tab === "overview" && <OverviewTab config={config} healthItems={healthItems} allOk={allOk} hasError={hasError} configPath={configPath} onRecheckDeps={onRecheckDeps} onOpenWizard={onOpenWizard} onResetConfig={onResetConfig} theme={theme} onThemeChange={onThemeChange} onTestAiConnection={onTestAiConnection} />}
-          {tab === "keys" && <KeysTab keychain={keychain} />}
+          {tab === "overview" && <OverviewTab onRecheckDeps={onRecheckDeps} onOpenWizard={onOpenWizard} onResetConfig={onResetConfig} theme={theme} onThemeChange={onThemeChange} onTestAiConnection={onTestAiConnection} />}
+          {tab === "keys" && <KeysTab keychain={keychain} config={config} update={update} />}
           {tab === "processing" && <ProcessingTab config={config} update={update} deps={deps} />}
-          {tab === "output" && <OutputTab config={config} update={update} onSelectDir={onSelectOutputDir} onOpenDir={onOpenOutputDir} />}
+          {tab === "output" && <OutputTab config={config} update={update} onSelectDir={onSelectOutputDir} onOpenDir={onOpenOutputDir} onOpenCacheDir={onOpenCacheDir} />}
           {tab === "features" && <FeaturesTab config={config} update={update} />}
           {tab === "advanced" && <AdvancedTab config={config} update={update} />}
           {tab === "about" && <AboutTab appIcon={appIcon} />}
         </div>
       </div>
 
-      {/* 底部保存栏 */}
-      <div className="settings-footer">
-        <span className="settings-footer-hint">
-          {saved ? "✅ 已保存" : "修改后点击保存"}
-        </span>
-        <Button onClick={handleSave}>
-          {saved ? "✅ 已保存" : "保存设置"}
+      {/* 右上角保存按钮 */}
+      <div style={{
+        position: "absolute", top: 8, right: 16, zIndex: 100,
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        {saved && (
+          <span style={{ fontSize: 11, color: "#4ade80" }}>✅ 已保存</span>
+        )}
+        <Button size="sm" onClick={handleSave}>
+          {saved ? "✅ 已保存" : "💾 保存设置"}
         </Button>
       </div>
     </div>
@@ -226,16 +147,15 @@ export function SettingsPage({
 
 function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 28 }}>
+    <div style={{ marginBottom: 16 }}>
       <h3 style={{
-        fontSize: 13, fontWeight: 600, color: "var(--text-secondary, #a0a0c0)",
-        textTransform: "uppercase", letterSpacing: "0.06em",
-        marginBottom: 12, paddingBottom: 8,
+        fontSize: 11, fontWeight: 600, color: "var(--text-secondary, #a0a0c0)",
+        marginBottom: 6, paddingBottom: 4,
         borderBottom: "1px solid var(--border, #2a2a4a)",
       }}>
         {title}
       </h3>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>{children}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{children}</div>
     </div>
   );
 }
@@ -245,12 +165,8 @@ function SettingsSection({ title, children }: { title: string; children: React.R
 // ============================================================
 
 function OverviewTab({
-  config, healthItems, allOk, hasError, configPath, onRecheckDeps, onOpenWizard, onResetConfig, theme, onThemeChange, onTestAiConnection,
+  onRecheckDeps, onOpenWizard, onResetConfig, theme, onThemeChange, onTestAiConnection,
 }: {
-  config: MyriadMindConfig;
-  healthItems: Array<{ label: string; icon: string; status: HealthStatus; detail: string }>;
-  allOk: boolean; hasError: boolean;
-  configPath?: string;
   onRecheckDeps?: () => void;
   onOpenWizard?: () => void;
   onResetConfig?: () => void;
@@ -277,7 +193,7 @@ function OverviewTab({
   return (
     <>
       <SettingsSection title="外观主题">
-        <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
+        <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 6px" }}>
           选择应用的外观主题，立即生效
         </p>
         <div className="settings-pill-group">
@@ -297,41 +213,19 @@ function OverviewTab({
         </div>
       </SettingsSection>
 
-      <SettingsSection title="配置状态">
-        <div style={{ fontSize: 12, lineHeight: 1.8, color: "var(--text-secondary, #a0a0c0)" }}>
-          {healthItems.map((h) => (
-            <div key={h.label} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
-              <span style={{ fontSize: 14, width: 24, textAlign: "center" }}>{h.icon}</span>
-              <span style={{ fontWeight: 500, width: 80 }}>{h.label}</span>
-              <span style={{ color: h.status === "ok" ? "#4ade80" : h.status === "warning" ? "#facc15" : h.status === "error" ? "#f87171" : "var(--text-muted, #666)" }}>
-                {h.status === "ok" ? "正常" : h.status === "warning" ? "警告" : h.status === "error" ? "阻塞" : "未配置"}
-              </span>
-              <span style={{ color: "var(--text-muted, #666)", marginLeft: 8, fontSize: 11 }}>{h.detail}</span>
-            </div>
-          ))}
-          {configPath && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-              <span style={{ fontSize: 14, width: 24, textAlign: "center" }}>📁</span>
-              <span style={{ fontWeight: 500, width: 80 }}>配置路径</span>
-              <span style={{ color: "var(--text-muted, #666)", fontSize: 11 }}>{configPath}</span>
-            </div>
-          )}
-        </div>
-      </SettingsSection>
-
       <SettingsSection title="快捷操作">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {onRecheckDeps && (
-            <Button variant="secondary" onClick={onRecheckDeps}>🔄 重新检测依赖</Button>
+            <Button variant="secondary" size="sm" onClick={onRecheckDeps}>🔄 重新检测依赖</Button>
           )}
           {onOpenWizard && (
-            <Button variant="secondary" onClick={onOpenWizard}>🧭 打开配置向导</Button>
+            <Button variant="secondary" size="sm" onClick={onOpenWizard}>🧭 打开配置向导</Button>
           )}
           {onResetConfig && (
-            <Button variant="secondary" onClick={onResetConfig}>🔄 重置配置</Button>
+            <Button variant="secondary" size="sm" onClick={onResetConfig}>🔄 重置配置</Button>
           )}
           {onTestAiConnection && (
-            <Button variant="secondary" onClick={handleTestConnection} disabled={aiTesting}>
+            <Button variant="secondary" size="sm" onClick={handleTestConnection} disabled={aiTesting}>
               {aiTesting ? "⏳ 测试中…" : "🧪 测试 AI 连接"}
             </Button>
           )}
@@ -350,16 +244,18 @@ function OverviewTab({
 // API 密钥 Tab
 // ============================================================
 
-function KeysTab({ keychain }: { keychain?: KeychainApi }) {
+function KeysTab({
+  keychain, config, update,
+}: {
+  keychain?: KeychainApi;
+  config: MyriadMindConfig;
+  update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
+}) {
   return (
     <>
       <SettingsSection title="🤖 AI 模型">
-        <p style={{ fontSize: 12, color: "var(--text-muted, #666)", marginBottom: 12 }}>
-          选择笔记生成使用的 AI 模型，密钥存储在 OS 密钥链中
-        </p>
-
         {/* Model selector */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           {[
             { id: "deepseek", label: "DeepSeek", available: true },
             { id: "claude", label: "Claude", available: false },
@@ -367,46 +263,45 @@ function KeysTab({ keychain }: { keychain?: KeychainApi }) {
             <div
               key={p.id}
               style={{
-                flex: 1, padding: "10px 14px", borderRadius: 10,
+                flex: 1, padding: "8px 12px", borderRadius: 8,
                 border: p.id === "deepseek" ? "2px solid #1683ff" : "1px solid var(--border, #2a2a4a)",
                 background: p.id === "deepseek" ? "rgba(22,131,255,0.06)" : "var(--bg-surface, #1a1a2e)",
                 opacity: p.available ? 1 : 0.4,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text, #e0e0f0)" }}>{p.label}</span>
-                {p.id === "deepseek" && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(22,131,255,0.15)", color: "#1683ff" }}>当前</span>}
-                {!p.available && <span style={{ fontSize: 10, color: "var(--text-muted, #666)" }}>即将支持</span>}
+                <span style={{ fontWeight: 600, fontSize: 12, color: "var(--text, #e0e0f0)" }}>{p.label}</span>
+                {p.id === "deepseek" && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(22,131,255,0.15)", color: "#1683ff" }}>当前</span>}
+                {!p.available && <span style={{ fontSize: 9, color: "var(--text-muted, #666)" }}>即将支持</span>}
               </div>
-              <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "2px 0 0" }}>
+              <p style={{ fontSize: 10, color: "var(--text-muted, #666)", margin: "2px 0 0" }}>
                 {p.id === "deepseek" ? "V4 Pro / Flash · 1M 上下文" : "Anthropic · 后续版本"}
               </p>
             </div>
           ))}
         </div>
 
-        <KeyField
-          service="deepseek-api-key" label="DeepSeek API Key"
-          desc="platform.deepseek.com → API Keys · 必填"
-          placeholder="sk-..." required keychain={keychain}
-        />
+        <ConfigKeyInput label="DeepSeek API Key"
+          desc="platform.deepseek.com → API Keys" placeholder="sk-..."
+          value={config.deepseek_api_key ?? ""}
+          onChange={(v) => update("deepseek_api_key", v)} />
 
-        <details style={{ fontSize: 12, color: "var(--text-muted, #666)", marginTop: 12 }}>
+        <details style={{ fontSize: 11, color: "var(--text-muted, #666)", marginTop: 8 }}>
           <summary style={{ cursor: "pointer" }}>Claude API Key（可选 · 后续版本）</summary>
           <div style={{ marginTop: 8 }}>
-            <KeyField
-              service="claude-api-key" label="Claude API Key"
+            <KeyField service="claude-api-key" label="Claude API Key"
               desc="Anthropic 控制台 → API Keys · v2 备用" placeholder="sk-ant-api03-..."
-              required={false} keychain={keychain}
-            />
+              required={false} keychain={keychain} />
           </div>
         </details>
       </SettingsSection>
 
       <SettingsSection title="📡 视频解析 & ASR 服务">
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <KeyField service="ai-douyin-api-key" label="AI Douyin API Key"
-            desc="抖音/B 站/小红书视频解析。aidouyin.com 注册获取" placeholder="输入 Key..." required={false} keychain={keychain} />
+          <ConfigKeyInput label="AI Douyin API Key"
+            desc="B站/抖音/小红书视频解析。aidouyin.com 注册获取" placeholder="输入 Key..."
+            value={config.ai_douyin_api_key ?? ""}
+            onChange={(v) => update("ai_douyin_api_key", v)} />
           <KeyField service="tikhub-token" label="TikHub Token"
             desc="视频解析备用方案。tikhub.io 注册获取" placeholder="输入 Token..." required={false} keychain={keychain} />
           <KeyField service="volcengine-token" label="火山引擎 Token"
@@ -414,6 +309,57 @@ function KeysTab({ keychain }: { keychain?: KeychainApi }) {
         </div>
       </SettingsSection>
     </>
+  );
+}
+
+/** 写入配置文件的 Key 输入框（自动保存） */
+function ConfigKeyInput({
+  label, desc, placeholder, value, onChange,
+}: {
+  label: string; desc: string; placeholder: string;
+  value: string; onChange: (v: string) => void;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{
+      padding: "8px 12px", borderRadius: 6, marginBottom: 4,
+      border: "1px solid var(--border, #2a2a4a)", background: value ? "rgba(74,222,128,0.04)" : "var(--bg-surface)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary, #a0a0c0)" }}>
+          {label} {value ? <span style={{ color: "#4ade80", fontSize: 10 }}>✅ 已配置</span> : null}
+        </span>
+        <button
+          onClick={() => setShow(!show)}
+          style={{
+            fontSize: 10, padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+            border: "1px solid var(--border, #2a2a4a)", background: "var(--bg-app)",
+            color: "var(--text-secondary, #a0a0c0)",
+          }}
+        >
+          {show ? "隐藏" : value ? "编辑" : "配置"}
+        </button>
+      </div>
+      <p style={{ fontSize: 10, color: "var(--text-muted, #666)", margin: "0 0 4px" }}>{desc}</p>
+      {show && (
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            type="password" value={value} onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder}
+            style={{
+              flex: 1, padding: "5px 8px", fontSize: 11, borderRadius: 4,
+              border: "1px solid var(--border, #333)", background: "var(--bg-input, #1f2026)",
+              color: "var(--text, #e0e0f0)", outline: "none",
+            }}
+          />
+        </div>
+      )}
+      {show && !value && (
+        <p style={{ fontSize: 9, color: "#facc15", margin: "4px 0 0" }}>
+          ⚠️ 输入后自动保存到配置文件 ~/myriad-mind-config.json
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -616,12 +562,13 @@ function ProcessingTab({
 // ============================================================
 
 function OutputTab({
-  config, update, onSelectDir, onOpenDir,
+  config, update, onSelectDir, onOpenDir, onOpenCacheDir,
 }: {
   config: MyriadMindConfig;
   update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
   onSelectDir?: () => Promise<string | null>;
   onOpenDir?: () => void;
+  onOpenCacheDir?: () => void;
 }) {
   return (
     <>
@@ -660,6 +607,16 @@ function OutputTab({
           description="处理完成后删除 /tmp 中的视频、音频、字幕、截图"
           checked={config.output.cleanup_temp}
           onChange={(v) => update("output", { ...config.output, cleanup_temp: v })} />
+        {onOpenCacheDir && (
+          <div style={{ marginTop: 10 }}>
+            <Button variant="secondary" onClick={onOpenCacheDir}>
+              📁 打开缓存目录
+            </Button>
+            <span style={{ fontSize: 11, color: "var(--text-muted, #666)", marginLeft: 10 }}>
+              查看处理过程中产生的临时文件（视频、音频、字幕、截图）
+            </span>
+          </div>
+        )}
       </SettingsSection>
 
       <SettingsSection title="笔记元信息">
@@ -702,26 +659,12 @@ function FeaturesTab({
       </SettingsSection>
 
       <SettingsSection title="视频处理">
-        <Toggle label="关键帧截图" description="从视频截图并嵌入笔记"
+        <Toggle label="关键帧截图" description="AI 字幕分析推荐时间点 + 场景变化检测"
           checked={config.features.keyframes} onChange={() => toggle("keyframes")} />
         {config.features.keyframes && (
-          <div style={{ marginTop: 8 }}>
-            <Input label="截图间隔（秒）" type="number" min={5} max={300}
-              value={config.keyframes.interval}
-              onChange={(e) => update("keyframes", { ...config.keyframes, interval: Math.max(5, Math.min(300, Number(e.target.value) || 30)) })} />
-            <div style={{ marginTop: 8 }}>
-              <Select label="截图模式"
-                options={[
-                  { value: "interval", label: "固定间隔" },
-                  { value: "scene", label: "场景检测" },
-                  { value: "both", label: "两者结合" },
-                ]}
-                value={config.keyframes.mode}
-                onChange={(e) => update("keyframes", { ...config.keyframes, mode: e.target.value as "interval" | "scene" | "both" })} />
-            </div>
-
+          <div style={{ marginTop: 6 }}>
             {/* ---- AI 截图审查 ---- */}
-            <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 8,
+            <div style={{ padding: "10px 12px", borderRadius: 6,
               border: "1px solid rgba(22,131,255,0.2)", background: "rgba(22,131,255,0.04)" }}>
               <Toggle label="🤖 AI 智能截图审查"
                 description="使用 DeepSeek Vision 逐张分析截图价值，自动过滤纯人脸、黑屏、过渡画面"

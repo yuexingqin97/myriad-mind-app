@@ -3,7 +3,7 @@ import { type MyriadMindConfig } from "@myriad-mind/core";
 import { ConfigWizard, SettingsPage, type KeychainApi, type DepsInfo, type ThemeMode } from "@myriad-mind/ui";
 import * as api from "@/api";
 import type { DepResult } from "@/api";
-import { DepsPanel } from "@/components/settings/DepsPanel";
+
 import { useTheme } from "@/hooks/useTheme";
 import appIcon from "@/assets/icons/myriad-mind-whale-icon-concept.png";
 
@@ -89,7 +89,6 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard, onNa
         />
       ) : (
         <>
-          <DepsPanel pythonPath={config.python_path || undefined} />
           <SettingsPage
             config={config}
             onSave={onSave}
@@ -99,6 +98,7 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard, onNa
             onOpenWizard={() => setShowWizard(true)}
             onSelectOutputDir={async () => api.pickFolder()}
             onOpenOutputDir={() => { /* TBD: open in explorer */ }}
+            onOpenCacheDir={() => api.openCacheDir()}
             theme={theme}
             onThemeChange={setTheme}
             appIcon={appIcon}
