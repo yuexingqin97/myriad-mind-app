@@ -305,9 +305,24 @@ async fn run_text_pipeline(
     emit_progress(app, "classify", &format!("内容类型: {content_type}"), 40.0, "completed", None);
 
     // 确保 .myriad-mind/ 索引存在
-    emit_progress(app, "library", "📚 检查知识库索引", 42.0, "running", None);
-    let _ = crate::commands::library::ensure_library(note_dir);
-    emit_progress(app, "library", "索引就绪", 45.0, "completed", None);
+    let lib_dir = std::path::PathBuf::from(note_dir).join(".myriad-mind");
+    let is_new_lib = !lib_dir.exists();
+    emit_progress(app, "library", "📚 检查知识库索引", 42.0, "running",
+        if is_new_lib { Some("首次使用此输出目录，正在建立索引…") } else { None });
+    match crate::commands::library::ensure_library(note_dir) {
+        Ok(()) => {
+            let detail = if is_new_lib {
+                let count = count_md_files(note_dir);
+                Some(format!("索引建立完成 · 已扫描 {count} 篇已有笔记"))
+            } else {
+                Some("索引就绪".into())
+            };
+            emit_progress(app, "library", "索引就绪", 45.0, "completed", detail.as_deref());
+        }
+        Err(e) => {
+            emit_progress(app, "library", &format!("索引建立失败: {e}"), 45.0, "completed", None);
+        }
+    }
 
     emit_progress(app, "generate_note", "🤖 AI 生成笔记 (DeepSeek V4 Pro)", 50.0, "running",
         Some("正在调用 AI 模型，流式输出中…"));
@@ -376,6 +391,26 @@ fn emit_progress(
     if let Err(e) = app.emit("pipeline-progress", event) {
         log::error!("[pipeline] emit failed: {e}");
     }
+}
+
+fn count_md_files(dir: &str) -> usize {
+    let mut count = 0;
+    fn walk(dir: &std::path::Path, count: &mut usize) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    if !entry.file_name().to_string_lossy().starts_with('.') {
+                        walk(&p, count);
+                    }
+                } else if p.extension().map(|e| e == "md").unwrap_or(false) {
+                    *count += 1;
+                }
+            }
+        }
+    }
+    walk(&std::path::PathBuf::from(dir), &mut count);
+    count
 }
 
 fn check_deps(python_path: &str) -> Result<(), AppError> {

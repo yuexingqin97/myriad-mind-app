@@ -189,6 +189,8 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
 
         if (event.status === "running") {
           pushLog("step", event.label);
+        } else if (event.status === "completed") {
+          pushLog("step", event.label);
         }
         if (event.detail && event.status !== "failed") {
           pushLog("info", event.detail);
