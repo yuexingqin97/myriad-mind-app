@@ -22,6 +22,8 @@ import "./App.css";
 
 type View = "input" | "dashboard" | "config";
 
+// ---- Mock 数据（浏览器预览用）----
+
 const mockDashboardData: DashboardData = {
   cultivation: calculateCultivation({
     totalNotes: 3, beginnerNotes: 1, intermediateNotes: 1, advancedNotes: 1,
@@ -46,45 +48,43 @@ const mockDashboardData: DashboardData = {
   streak: 3,
 };
 
-/** 检查是否在 Tauri 环境中 */
-async function isTauriReady(): Promise<boolean> {
+const mockPipelineSteps = [
+  { label: "识别输入模式", pct: 10 },
+  { label: "检查环境依赖", pct: 25 },
+  { label: "获取媒体内容", pct: 45 },
+  { label: "AI 分析生成", pct: 70 },
+  { label: "组装学习笔记", pct: 90 },
+  { label: "更新修为面板", pct: 100 },
+];
+
+// ---- Helpers ----
+
+/** 是否在 Tauri 桌面环境中运行 */
+let _isTauri: boolean | null = null;
+async function isTauri(): Promise<boolean> {
+  if (_isTauri !== null) return _isTauri;
   try {
     await import("@tauri-apps/api/core");
-    return true;
+    _isTauri = true;
   } catch {
-    return false;
+    _isTauri = false;
   }
+  return _isTauri;
 }
 
-/** 调用 Tauri execute_pipeline 命令 */
-async function invokePipeline(
-  input: string,
-  mode: string,
-  pythonPath?: string,
-  noteDir?: string,
-): Promise<{ success: boolean; mode: string; duration_seconds: number; note_path?: string; error?: string }> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke("execute_pipeline", {
-    input,
-    mode,
-    pythonPath: pythonPath ?? null,
-    noteDir: noteDir ?? "",
-  });
-}
+// ---- App ----
 
 function App() {
-  const [view, setView] = useState<View>("config");
-  const [ready, setReady] = useState(false);
+  const [view, setView] = useState<View>("input");
   const [config, setConfig] = useState<MyriadMindConfig>(DEFAULT_CONFIG);
   const [inputUrl, setInputUrl] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressDetail, setProgressDetail] = useState<string | null>(null);
-  const [dashboardData] = useState<DashboardData>(mockDashboardData);
   const [processing, setProcessing] = useState(false);
   const pipelineCancelRef = useRef<(() => void) | null>(null);
 
-  // Keychain 适配器 — 桥接 Tauri IPC 密钥链命令到 UI 组件
+  // Keychain 适配器
   const keychainAdapter: KeychainApi = React.useMemo(() => ({
     async check(service: string) {
       const result = await api.checkKeychainEntry(service, "myriad-mind");
@@ -98,24 +98,26 @@ function App() {
     },
   }), []);
 
-  // 启动时检测首启 + 加载配置
+  // 启动时：Tauri 环境读配置 + 首启检测，浏览器环境直接进入炼化页
   useEffect(() => {
     (async () => {
-      const first = await api.isFirstLaunch();
-      if (!first) {
-        try {
-          const raw = await api.readConfig();
-          if (raw && raw !== "{}") {
-            setConfig((prev) => ({ ...prev, ...JSON.parse(raw) }));
+      if (await isTauri()) {
+        const first = await api.isFirstLaunch();
+        if (!first) {
+          try {
+            const raw = await api.readConfig();
+            if (raw && raw !== "{}") {
+              setConfig((prev) => ({ ...prev, ...JSON.parse(raw) }));
+            }
+            setView("input");
+          } catch {
+            setView("config");
           }
-          setView("input");
-        } catch {
+        } else {
           setView("config");
         }
-      } else {
-        setView("config");
       }
-      setReady(true);
+      // 浏览器模式: 默认 input 页，mock 数据即可
     })();
   }, []);
 
@@ -126,99 +128,78 @@ function App() {
     setView("input");
   }, []);
 
-  // 跳过配置
   const handleConfigDone = useCallback(() => setView("input"), []);
 
+  // ---- 炼化提交 ----
+
   const handleSubmit = useCallback(async () => {
-    if (!inputUrl.trim()) return;
+    if (!inputUrl.trim() || processing) return;
     const classify = classifyInput(inputUrl.trim());
     const estimate = estimateCost(classify, config);
 
-    const estimateLabel = `${classify.platform} · 预估 ${estimate.estimatedMinutes} 分钟 · ${Math.round((estimate.inputTokens + estimate.outputTokens) / 1000)}k tokens`;
-    setStatus(estimateLabel);
+    setStatus(
+      `${classify.platform} · 预估 ${estimate.estimatedMinutes} 分钟 · ${Math.round((estimate.inputTokens + estimate.outputTokens) / 1000)}k tokens`
+    );
     setProgressDetail(null);
     setProcessing(true);
     setProgress(0);
 
-    // 注册管线进度事件监听
-    const unlisten = api.listenPipelineProgress((event) => {
-      setProgress(Math.round(event.percent));
-      setStatus(event.label);
-      if (event.detail) {
-        setProgressDetail(event.detail);
-      }
-      if (event.status === "completed" && event.step === "completed") {
+    if (await isTauri()) {
+      // ====== Tauri 真实管线 ======
+      const unlisten = api.listenPipelineProgress((event) => {
+        setProgress(Math.round(event.percent));
+        setStatus(event.label);
+        if (event.detail) setProgressDetail(event.detail);
+        if (event.status === "completed" && event.step === "completed") {
+          setProcessing(false);
+          unlisten();
+          pipelineCancelRef.current = null;
+        }
+        if (event.status === "failed") {
+          setProcessing(false);
+          setProgressDetail(`❌ ${event.label}`);
+          unlisten();
+          pipelineCancelRef.current = null;
+        }
+      });
+      pipelineCancelRef.current = unlisten;
+
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const result = await invoke("execute_pipeline", {
+          input: inputUrl.trim(),
+          mode: classify.mode,
+          pythonPath: config.python_path || null,
+          noteDir: config.output.note_dir || "",
+        }) as { success: boolean; mode: string; duration_seconds: number };
+        if (result.success) {
+          setProgress(100);
+          setStatus(`✅ 炼化完成 — ${result.mode} · ${result.duration_seconds.toFixed(1)}s`);
+        }
+      } catch (e) {
+        setStatus(`❌ 管线执行失败: ${e}`);
         setProcessing(false);
         unlisten();
-        pipelineCancelRef.current = null;
       }
-      if (event.status === "failed") {
-        setProcessing(false);
-        setProgressDetail(`❌ ${event.label}`);
-        unlisten();
-        pipelineCancelRef.current = null;
-      }
-    });
-    pipelineCancelRef.current = unlisten;
-
-    try {
-      // 调用 Rust execute_pipeline
-      await api.streamNoteGeneration(
-        // 复用 streamNoteGeneration 的 invoke 通道是不对的，需要直接调 pipeline
-        // 暂用 browser mock fallback
-        [],
-        "",
-        "",
-      );
-    } catch {
-      // Tauri 环境外走 mock 路径
-    }
-
-    // 如果不在 Tauri 环境，走 mock 进度模拟
-    if (!await isTauriReady()) {
-      unlisten();
-      const steps = [
-        { label: "识别输入模式", pct: 10 },
-        { label: "检查环境依赖", pct: 25 },
-        { label: "获取媒体内容", pct: 45 },
-        { label: "AI 分析生成", pct: 70 },
-        { label: "组装学习笔记", pct: 90 },
-        { label: "更新修为面板", pct: 100 },
-      ];
-      for (const step of steps) {
-        await new Promise((r) => setTimeout(r, 400 + Math.random() * 300));
+    } else {
+      // ====== 浏览器 Mock 模拟 ======
+      for (const step of mockPipelineSteps) {
+        await new Promise((r) => setTimeout(r, 350 + Math.random() * 250));
         setStatus(step.label);
         setProgress(step.pct);
       }
       setProcessing(false);
       setStatus("✅ 炼化完成 — 笔记已生成（浏览器模拟）");
-      return;
+      setProgressDetail(`识别为 ${classify.platform}，模拟耗时 ${(mockPipelineSteps.length * 0.5).toFixed(1)}s`);
     }
+  }, [inputUrl, config, processing]);
 
-    // Tauri 环境: 调用真实管线
-    try {
-      const result = await invokePipeline(
-        inputUrl.trim(),
-        classify.mode,
-        config.python_path || undefined,
-        config.output.note_dir || "",
-      );
-      if (result.success) {
-        setProgress(100);
-        setStatus(`✅ 炼化完成 — ${result.mode} · ${result.duration_seconds.toFixed(1)}s`);
-      }
-    } catch (e) {
-      setStatus(`❌ 管线执行失败: ${e}`);
-      setProcessing(false);
-    }
-  }, [inputUrl, config]);
-
-  // 组件卸载时清理进度监听
+  // 清理
   useEffect(() => {
-    return () => {
-      pipelineCancelRef.current?.();
-    };
+    return () => { pipelineCancelRef.current?.(); };
   }, []);
+
+  // ---- Render ----
 
   return (
     <div className="app-root">
@@ -240,7 +221,7 @@ function App() {
 
         <div className="sidebar-footer">
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            v0.1.0 · Windows
+            v0.1.0 · Browser
           </span>
         </div>
       </nav>
@@ -313,7 +294,7 @@ function App() {
           <div className="view-container">
             <h2 className="view-title">📊 修为面板</h2>
             <p className="view-subtitle">修炼进度 · 统计面板 · 成就系统</p>
-            <Dashboard data={dashboardData} />
+            <Dashboard data={mockDashboardData} />
           </div>
         )}
 
@@ -336,6 +317,8 @@ function App() {
     </div>
   );
 }
+
+// ---- Sub-components ----
 
 function NavButton({ active, icon, label, hotkey, onClick }: {
   active: boolean; icon: string; label: string; hotkey: string; onClick: () => void;
