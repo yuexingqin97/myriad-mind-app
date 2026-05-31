@@ -72,9 +72,7 @@ export function ConfigWizard({
 
   // Step-specific "next" availability
   const canProceed = (() => {
-    if (step === 0) return true; // welcome always ok
-    if (step === 1) return true; // deps always ok (can skip)
-    if (step === 2) return true; // keys — warn but allow skip
+    if (step === 4) return !!config.output.note_dir?.trim(); // output dir required
     return true;
   })();
 
@@ -564,12 +562,15 @@ function OutputStep({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
         <Input
-          label="笔记输出目录"
+          label="笔记输出目录 *"
           value={config.output.note_dir}
-          placeholder="留空则输出到默认目录；例: D:/Notes/MyriadMind"
-          hint="可选云盘文件夹路径以实现跨设备同步"
+          placeholder="必填 — 例如: D:/Notes/MyriadMind"
+          hint="笔记将保存到此目录。推荐选云盘文件夹以实现跨设备同步"
           onChange={(e) => update("output", { ...config.output, note_dir: e.target.value })}
         />
+        {!config.output.note_dir && (
+          <p style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>⚠️ 必须设置输出目录，否则无法保存生成的笔记</p>
+        )}
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           {onSelectDir && (
             <button onClick={async () => {
@@ -728,7 +729,7 @@ function ReviewStep({
     { label: "系统依赖", value: depsOk === null ? "未检测" : depsOk ? "全部就绪" : "有缺失项", ok: depsOk },
     { label: "ASR 后端", value: config.asr.backend === "faster-whisper" ? "faster-whisper（本地）" : "火山引擎（云端）" },
     { label: "视频提供商", value: config.video.provider === "ai-douyin" ? "AI Douyin" : "TikHub" },
-    { label: "输出目录", value: config.output.note_dir || "默认目录" },
+    { label: "输出目录", value: config.output.note_dir || "❌ 未设置", ok: !!config.output.note_dir },
     { label: "功能开启", value: Object.entries(config.features).filter(([, v]) => v).length + " 项" },
   ];
 

@@ -560,12 +560,15 @@ function OutputTab({
     <>
       <SettingsSection title="笔记输出">
         <Input
-          label="笔记输出目录"
+          label="笔记输出目录 *"
           value={config.output.note_dir}
-          placeholder="留空则输出到默认目录。例: D:/Notes/ 或 ./大衍决残卷/"
-          hint="绝对路径或相对路径。选在云盘文件夹可跨设备同步。"
+          placeholder="必填 — 例如: D:/Notes/MyriadMind"
+          hint="笔记将保存到此目录。选在云盘文件夹可跨设备同步"
           onChange={(e) => update("output", { ...config.output, note_dir: e.target.value })}
         />
+        {!config.output.note_dir && (
+          <p style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>⚠️ 必须设置输出目录，否则无法保存生成的笔记</p>
+        )}
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           {onSelectDir && (
             <Button variant="secondary" onClick={async () => {
