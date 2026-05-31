@@ -79,13 +79,15 @@ Rust 后端通过 `commands/` 模块暴露 Tauri IPC 命令，每个 Python 脚�
 5. **README 顶部必须有免责声明** — 工具仅供个人学习/研究/教育
 6. **宣传措辞避免** "免费下载""破解""绕过"等
 
-详见 `docs/legal-analysis.md` 完整风险分析。
+详见 `docs/法律风险分析.md` 完整风险分析。
 
 ## 现有文档
 
 - `README.md` — 项目总览（技术栈、架构、路线图、风险）
-- `docs/architecture.md` — 详细架构设计（含 Rust 模块树、Python 调度代码示例、Zod Schema 完整定义）
-- `docs/legal-analysis.md` — 法律风险分析 + 免责模板
+- `docs/架构设计.md` — 详细架构设计（含 Rust 模块树、Python 调度代码示例、Zod Schema 完整定义）
+- `docs/法律风险分析.md` — 法律风险分析 + 免责模板
+- `docs/需求与排期.md` — 需求整理 & 任务拆解 & 时间评估
+- `docs/项目管理/开发任务清单.md` — 当前开发进度跟踪
 - `.gitignore` — 注意 `myriad-mind-config.json` 被忽略（含占位示例文件），密钥文件 (.jks/.p8/.key/.mobileprovision) 被忽略
 
 ## 开发环境

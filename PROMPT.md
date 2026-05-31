@@ -3,7 +3,7 @@
 ## 上下文
 - 项目: myriad-mind-app (独立跨平台桌面+移动App)
 - 位置: D:/Project/myriad-mind-app/
-- 架构文档: docs/architecture.md, CLAUDE.md
+- 架构文档: docs/架构设计.md, CLAUDE.md
 - 设计原则: 核心逻辑只写一次 (packages/core/)，平台差异各自实现
 - 环境: Windows 11, Node 24, Rust 1.93, Python 3.12
 
@@ -31,7 +31,7 @@ apps/mobile/       → React Native Expo
 - tsconfig.json
 - src/index.ts (导出入口)
 - src/types.ts (配置类型 Config, 笔记类型 Note, 面板类型 Dashboard)
-- src/schema.ts (配置 Schema Zod 验证 — 参考 docs/architecture.md 已有定义)
+- src/schema.ts (配置 Schema Zod 验证 — 参考 docs/架构设计.md 已有定义)
 - src/note-parser.ts (笔记解析/统计)
 - src/panel-calc.ts (修为面板计算 — 等级/成就/标签云)
 
@@ -73,7 +73,7 @@ apps/mobile/       → React Native Expo
    - 每个独立功能或模块完成马上提交，不延迟
 2. 如果某个脚手架命令失败，手动创建文件
 3. 不要删除任何已有文档
-4. 配置文件名和目录结构参照 docs/architecture.md
+4. 配置文件名和目录结构参照 docs/架构设计.md
 5. **不阻塞原则** — 遇到以下情况立即跳过，记录在 commit message，继续做其他事：
    - 权限不足（如 npm install -g 需要管理员）
    - 网络超时/下载失败（重试 1 次仍失败就跳过）
