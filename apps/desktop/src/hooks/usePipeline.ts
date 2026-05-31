@@ -189,10 +189,7 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
           pushLog("info", event.detail);
         }
 
-        // Completion: any step with status "completed" and high progress
-        if (event.status === "completed" && event.percent >= 90) {
-          finishPipeline();
-        }
+        // Failures: only stop on explicit failure
         if (event.status === "failed") {
           pushLog("error", `❌ ${event.label}`);
           setProgressDetail(`❌ ${event.label}`);
