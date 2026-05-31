@@ -17,6 +17,8 @@ interface UsePipelineOptions {
 interface UsePipelineResult {
   inputUrl: string;
   setInputUrl: (v: string) => void;
+  noteCategory: string;
+  setNoteCategory: (v: string) => void;
   status: string | null;
   progress: number;
   progressDetail: string | null;
@@ -112,6 +114,7 @@ async function runMockPipeline(
 
 export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
   const [inputUrl, setInputUrl] = useState("");
+  const [noteCategory, setNoteCategory] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressDetail, setProgressDetail] = useState<string | null>(null);
@@ -253,6 +256,7 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
           mode: classify.mode,
           pythonPath: config.python_path || null,
           noteDir: config.output.note_dir || "",
+          noteCategory: noteCategory || null,
         }) as { success: boolean; mode: string; duration_seconds: number };
         if (result.success) {
           setProgress(100);
@@ -282,6 +286,8 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
   return {
     inputUrl,
     setInputUrl,
+    noteCategory,
+    setNoteCategory,
     status,
     progress,
     progressDetail,

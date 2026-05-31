@@ -82,6 +82,8 @@ export function InputView({ config }: InputViewProps) {
   const {
     inputUrl,
     setInputUrl,
+    noteCategory,
+    setNoteCategory,
     status,
     progress,
     progressDetail,
@@ -122,6 +124,19 @@ export function InputView({ config }: InputViewProps) {
               value={inputUrl}
               onChange={(e) => setInputUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submit()}
+            />
+            <input
+              placeholder="子目录（可选）"
+              value={noteCategory}
+              onChange={(e) => setNoteCategory(e.target.value)}
+              disabled={processing}
+              style={{
+                width: 130, padding: "8px 10px", fontSize: 13, borderRadius: 8,
+                border: "1px solid var(--border-default, #383a43)",
+                background: "var(--bg-input, #1f2026)",
+                color: "var(--text, #e0e0f0)", outline: "none",
+              }}
+              title="留空自动分类 · 如 Rust / AI / Rust/异步编程"
             />
             <Button onClick={submit} disabled={!inputUrl.trim() || processing} loading={processing}>
               炼化

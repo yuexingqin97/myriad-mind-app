@@ -73,6 +73,7 @@ pub async fn execute_pipeline(
     mode: String,
     python_path: Option<String>,
     note_dir: String,
+    note_category: Option<String>,
 ) -> Result<PipelineResult, AppError> {
     let start = std::time::Instant::now();
     let input_mode: InputMode =
@@ -103,7 +104,7 @@ pub async fn execute_pipeline(
             run_audio_pipeline(&app, &input, &py, &note_dir).await
         }
         InputMode::ArticleUrl | InputMode::LocalText | InputMode::CodeProject => {
-            run_text_pipeline(&app, &input, &note_dir).await
+            run_text_pipeline(&app, &input, &note_dir, note_category.as_deref()).await
         }
     };
 
@@ -270,7 +271,8 @@ async fn run_audio_pipeline(
 async fn run_text_pipeline(
     app: &AppHandle,
     input: &str,
-    _note_dir: &str,
+    note_dir: &str,
+    note_category: Option<&str>,
 ) -> Result<(), AppError> {
     emit_progress(app, "read", "读取内容", 15.0, "running", None);
 
@@ -308,25 +310,23 @@ async fn run_text_pipeline(
         Ok(note) => {
             emit_progress(app, "save", "💾 保存笔记", 90.0, "running", None);
 
-            // 保存笔记
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let note_filename = format!("note_{ts}.md");
-            let note_path = std::path::PathBuf::from(_note_dir).join(&note_filename);
-
-            if let Err(e) = std::fs::create_dir_all(std::path::PathBuf::from(_note_dir)) {
-                emit_progress(app, "save", &format!("创建目录失败: {e}"), 95.0, "failed", None);
-                return Err(AppError::Io(e));
+            // 自动分类并保存
+            let source_type = if input.starts_with("http") { "article" } else { "file" };
+            match crate::commands::notes::save_note(
+                &note, input, source_type, note_dir, note_category,
+            ) {
+                Ok(result) => {
+                    let detail = format!(
+                        "📁 {}/{}/\n📝 v{} · {} 字符",
+                        result.category, result.title, result.version, note.len()
+                    );
+                    emit_progress(app, "save", "笔记已保存", 98.0, "completed", Some(&detail));
+                }
+                Err(e) => {
+                    emit_progress(app, "save", &format!("保存失败: {e}"), 95.0, "failed", None);
+                    return Err(e);
+                }
             }
-
-            std::fs::write(&note_path, &note)
-                .map_err(|e| AppError::Io(e))?;
-
-            let note_size = note.len();
-            emit_progress(app, "save", &format!("笔记已保存 · {} 字符", note_size), 98.0, "completed",
-                Some(&format!("📁 {}", note_path.display())));
         }
         Err(e) => {
             emit_progress(app, "generate_note", &format!("AI 生成失败: {e}"), 90.0, "failed",
