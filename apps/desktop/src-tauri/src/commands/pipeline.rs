@@ -275,21 +275,39 @@ async fn run_text_pipeline(
     emit_progress(app, "read", "读取内容", 15.0, "running", None);
 
     let text = if input.starts_with("http") {
-        emit_progress(app, "read", "抓取网页内容", 25.0, "running", None);
+        emit_progress(app, "fetch", "🌐 抓取网页内容", 20.0, "running", None);
         // TODO: WebFetch (reqwest + HTML 提取)
+        emit_progress(app, "fetch", "⚠️ 网页抓取尚未实现", 25.0, "completed",
+            Some("当前版本仅支持本地文件，网页抓取即将支持"));
         "（网页内容待抓取）".to_string()
     } else {
-        std::fs::read_to_string(input).unwrap_or_else(|_| "（无法读取）".to_string())
+        emit_progress(app, "read", "📂 读取本地文件", 10.0, "running",
+            Some(&format!("路径: {input}")));
+        let content = std::fs::read_to_string(input).unwrap_or_else(|_| "（无法读取）".to_string());
+        let detail = format!("读取完成 · {} 字符", content.len());
+        emit_progress(app, "read", &detail, 30.0, "completed",
+            Some("内容已加载，准备送入 AI 分析"));
+        content
     };
 
-    let read_detail = format!("读取完成 ({}字)", text.len());
-    emit_progress(app, "read", &read_detail, 40.0, "completed", None);
+    emit_progress(app, "classify", "🔍 分析内容类型", 35.0, "running", None);
+    let content_type = if text.contains("```") || text.contains("fn ") || text.contains("class ") {
+        "代码"
+    } else if text.len() < 500 {
+        "短文"
+    } else {
+        "文本"
+    };
+    emit_progress(app, "classify", &format!("内容类型: {content_type}"), 40.0, "completed", None);
 
-    emit_progress(app, "generate_note", "AI 生成笔记", 50.0, "running", None);
+    emit_progress(app, "generate_note", "🤖 AI 生成笔记 (DeepSeek V4 Pro)", 50.0, "running",
+        Some("正在调用 AI 模型，流式输出中…"));
 
     // 调用 MindEngine (DeepSeek V4 Pro)
     match ai::generate_note(app, &text, "文本").await {
         Ok(note) => {
+            emit_progress(app, "save", "💾 保存笔记", 90.0, "running", None);
+
             // 保存笔记
             let ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -306,8 +324,9 @@ async fn run_text_pipeline(
             std::fs::write(&note_path, &note)
                 .map_err(|e| AppError::Io(e))?;
 
-            emit_progress(app, "generate_note", "笔记生成完成", 95.0, "completed",
-                Some(&format!("已保存: {}", note_path.display())));
+            let note_size = note.len();
+            emit_progress(app, "save", &format!("笔记已保存 · {} 字符", note_size), 98.0, "completed",
+                Some(&format!("📁 {}", note_path.display())));
         }
         Err(e) => {
             emit_progress(app, "generate_note", &format!("AI 生成失败: {e}"), 90.0, "failed",
