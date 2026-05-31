@@ -219,10 +219,10 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
           case "delta": {
             streamAccumRef.current += (event.delta ?? "");
             setStreamingText(streamAccumRef.current);
-            // 每 ~800 字符刷一个分块到日志
+            // 每 ~2000 字符刷一个分块到日志（降低渲染频率）
             const len = streamAccumRef.current.length;
             const lastChunkLen = streamChunkRef.current;
-            if (len - lastChunkLen >= 800) {
+            if (len - lastChunkLen >= 2000) {
               pushLog("output", streamAccumRef.current.slice(lastChunkLen));
               streamChunkRef.current = len;
             }

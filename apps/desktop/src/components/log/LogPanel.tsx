@@ -45,7 +45,8 @@ export function LogPanel({ entries, streamingText }: LogPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // auto scroll — instant, no animation queuing
+    bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, [entries, streamingText]);
 
   return (
