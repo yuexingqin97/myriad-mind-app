@@ -1,5 +1,6 @@
 // ============================================================
-// 笔记存储 — 自动分类 + 目录结构 + Front Matter + 版本追踪
+// 笔记存储 — 自动分类 + Front Matter + 版本追踪
+// 目录结构: 输出目录/分类/标题.md + 输出目录/分类/assets/
 // ============================================================
 
 use crate::error::AppError;
@@ -8,16 +9,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 // ---- 数据结构 ----
-
-#[derive(Debug, Clone, Serialize)]
-pub struct NoteMeta {
-    pub title: String,
-    pub category: String,
-    pub slug: String,
-    pub target_dir: PathBuf,
-    pub version: u32,
-    pub is_new: bool,
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NoteSaveResult {
@@ -45,16 +36,17 @@ fn keyword_categories() -> Vec<(&'static str, Vec<&'static str>)> {
 // ---- 主入口 ----
 
 /// 保存 AI 生成的笔记到分类目录
+/// 结构: base_dir/分类/标题.md + base_dir/分类/assets/
 pub fn save_note(
     ai_output: &str,
     source_input: &str,
-    source_type: &str, // "bilibili", "file", "article", etc.
+    source_type: &str,
     base_dir: &str,
     user_category: Option<&str>,
 ) -> Result<NoteSaveResult, AppError> {
-    // 1. 提取标题
+    // 1. 提取标题 → 用作文件名
     let title = extract_title(ai_output).unwrap_or_else(|| "未命名笔记".to_string());
-    let slug = title_to_slug(&title);
+    let safe_name = title_to_slug(&title); // 用于文件名
 
     // 2. 检测分类
     let category = if let Some(cat) = user_category {
@@ -63,21 +55,25 @@ pub fn save_note(
         detect_category(ai_output, base_dir)
     };
 
-    // 3. 创建目录结构
-    let target_dir = PathBuf::from(base_dir).join(&category).join(&slug);
-    std::fs::create_dir_all(&target_dir)
-        .map_err(|e| AppError::Config(format!("创建笔记目录失败: {e}")))?;
+    // 3. 创建分类目录 + 共享 assets/
+    let cat_dir = PathBuf::from(base_dir).join(&category);
+    std::fs::create_dir_all(&cat_dir)
+        .map_err(|e| AppError::Config(format!("创建分类目录失败: {e}")))?;
+    std::fs::create_dir_all(cat_dir.join("assets"))
+        .ok();
 
-    // 4. 版本检测
-    let index_path = target_dir.join("index.md");
-    let version = if index_path.exists() {
-        read_current_version(&index_path) + 1
+    // 4. 确定文件路径（冲突检测）
+    let note_path = resolve_path(&cat_dir, &safe_name);
+
+    // 5. 版本检测
+    let version = if note_path.exists() {
+        read_current_version(&note_path) + 1
     } else {
         1
     };
     let is_new = version == 1;
 
-    // 5. 生成完整内容
+    // 6. 生成完整内容
     let now = chrono_now();
     let fingerprint = simple_hash(source_input);
     let front_matter = generate_frontmatter(
@@ -87,35 +83,44 @@ pub fn save_note(
     let version_entry = if is_new {
         format!("\n\n---\n\n## 更新记录\n\n### v1 · {now} · 初次炼化\n\n**来源：** {source_input}\n\n**本次内容：**\n- 初次生成结构化笔记。\n")
     } else {
-        let existing = if index_path.exists() {
-            std::fs::read_to_string(&index_path).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        let existing = std::fs::read_to_string(&note_path).unwrap_or_default();
         let body = strip_version_section(&existing);
-        format!("\n\n---\n\n## 更新记录\n\n{body}\n### v{version} · {now} · 重新炼化\n\n**来源：** {source_input}\n\n**变化：**\n- 基于同一输入重新炼化，更新内容。\n")
+        format!("\n\n---\n\n## 更新记录\n\n{body}### v{version} · {now} · 重新炼化\n\n**来源：** {source_input}\n\n**变化：**\n- 基于同一输入重新炼化。\n")
     };
 
     let final_content = format!("{front_matter}\n\n{ai_output}{version_entry}");
 
-    // 6. 写入
-    std::fs::write(&index_path, &final_content)
+    // 7. 写入
+    std::fs::write(&note_path, &final_content)
         .map_err(|e| AppError::Config(format!("写入笔记失败: {e}")))?;
 
-    // 7. 创建 assets 目录
-    let _ = std::fs::create_dir_all(target_dir.join("assets"));
-
     log::info!(
-        "[notes] saved: category={category}, slug={slug}, v{version}, path={}",
-        index_path.display()
+        "[notes] saved: {}/{safe_name}.md  v{version}",
+        cat_dir.display()
     );
 
     Ok(NoteSaveResult {
-        path: index_path.to_string_lossy().to_string(),
+        path: note_path.to_string_lossy().to_string(),
         title,
         category,
         version,
     })
+}
+
+/// 解析文件路径，冲突时加数字后缀
+fn resolve_path(cat_dir: &std::path::Path, base_name: &str) -> PathBuf {
+    let primary = cat_dir.join(format!("{base_name}.md"));
+    if !primary.exists() {
+        return primary;
+    }
+    // 尝试 base_name-2.md, base_name-3.md ...
+    for i in 2u32.. {
+        let alt = cat_dir.join(format!("{base_name}-{i}.md"));
+        if !alt.exists() {
+            return alt;
+        }
+    }
+    primary // unreachable fallback
 }
 
 // ---- 辅助函数 ----
@@ -131,7 +136,7 @@ fn extract_title(markdown: &str) -> Option<String> {
     None
 }
 
-/// 标题 → URL slug
+/// 标题 → 文件名安全 slug
 fn title_to_slug(title: &str) -> String {
     let slug = title
         .to_lowercase()
@@ -140,43 +145,33 @@ fn title_to_slug(title: &str) -> String {
         .replace("--", "-")
         .trim_matches('-')
         .to_string();
-    if slug.len() > 60 { slug[..60].to_string() } else { slug }
+    // 限制长度避免路径过长
+    if slug.len() > 64 { slug[..64].to_string() } else { slug }
 }
 
 /// 根据内容关键词 + 已有目录匹配分类
 fn detect_category(content: &str, base_dir: &str) -> String {
     let content_lower = content.to_lowercase();
-
-    // 扫描已有分类目录
     let existing = scan_categories(base_dir);
 
-    // 关键词匹配并计分
     let mut scores: HashMap<String, u32> = HashMap::new();
     for (category, keywords) in keyword_categories() {
-        let mut score = 0u32;
-        for kw in &keywords {
-            if content_lower.contains(kw) {
-                score += 1;
-            }
-        }
+        let score = keywords.iter().filter(|kw| content_lower.contains(*kw)).count() as u32;
         if score > 0 {
             scores.insert(category.to_string(), score);
         }
     }
 
-    // 优先匹配已有目录
     if let Some(best) = scores.iter().max_by_key(|&(_, s)| s) {
         let cat_name = best.0;
-        // 检查是否有精确匹配的已有目录
         for existing_cat in &existing {
             if existing_cat.to_lowercase() == cat_name.to_lowercase() {
-                return existing_cat.clone(); // 保留已有目录的大小写
+                return existing_cat.clone();
             }
         }
         return cat_name.clone();
     }
 
-    // 标题关键词 fallback
     if content_lower.contains("rust") { return "Rust".into(); }
     if content_lower.contains("ai") || content_lower.contains("deepseek") { return "AI".into(); }
 
@@ -199,26 +194,24 @@ fn scan_categories(base_dir: &str) -> Vec<String> {
     cats
 }
 
-/// 从现有 index.md 读取版本号
-fn read_current_version(index_path: &std::path::Path) -> u32 {
-    if let Ok(content) = std::fs::read_to_string(index_path) {
+/// 从现有 .md 读取版本号
+fn read_current_version(path: &std::path::Path) -> u32 {
+    if let Ok(content) = std::fs::read_to_string(path) {
         for line in content.lines() {
             if line.starts_with("current_version:") {
-                if let Some(v) = line.split(':').nth(1) {
-                    return v.trim().parse::<u32>().unwrap_or(1);
-                }
+                return line.split(':').nth(1)
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(1);
             }
         }
     }
     1
 }
 
-/// 从已有笔记中剥离版本记录段落（只保留 ## 更新记录 之前的部分）
+/// 剥离版本记录段落
 fn strip_version_section(content: &str) -> String {
     if let Some(pos) = content.find("\n## 更新记录") {
-        let after = &content[pos + "\n## 更新记录".len()..];
-        // 提取已有版本条目
-        after.trim().to_string()
+        content[pos + "\n## 更新记录".len()..].trim().to_string()
     } else {
         String::new()
     }
@@ -226,20 +219,14 @@ fn strip_version_section(content: &str) -> String {
 
 /// 生成 YAML front matter
 fn generate_frontmatter(
-    title: &str,
-    category: &str,
-    version: u32,
-    source_type: &str,
-    source_raw: &str,
-    fingerprint: &str,
-    now: &str,
+    title: &str, category: &str, version: u32,
+    source_type: &str, source_raw: &str, fingerprint: &str, now: &str,
 ) -> String {
     format!(
         "---\n\
          id: note_{fingerprint}\n\
          title: {title}\n\
          category: {category}\n\
-         slug: {slug}\n\
          source_type: {source_type}\n\
          source_raw: {source_raw}\n\
          source_fingerprint: sha256:{fingerprint}\n\
@@ -248,12 +235,9 @@ fn generate_frontmatter(
          updated_at: {now}\n\
          ai_provider: deepseek\n\
          ai_model: deepseek-v4-pro\n\
-         ---",
-        slug = title_to_slug(title),
+         ---"
     )
 }
-
-// ---- 工具 ----
 
 fn chrono_now() -> String {
     use std::time::SystemTime;
