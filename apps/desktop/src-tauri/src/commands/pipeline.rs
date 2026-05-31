@@ -415,6 +415,58 @@ fn count_md_files(dir: &str) -> usize {
     count
 }
 
+/// 追问笔记：读取已有笔记 → AI 回答 → 追加到问答记录
+#[tauri::command]
+pub async fn execute_qa(
+    app: AppHandle,
+    note_path: String,
+    question: String,
+    write_back: bool,
+) -> Result<String, AppError> {
+    emit_progress(&app, "qa", "📖 读取笔记", 10.0, "running", Some(&note_path));
+
+    let content = std::fs::read_to_string(&note_path)
+        .map_err(|e| AppError::Config(format!("读取笔记失败: {e}")))?;
+
+    emit_progress(&app, "qa", "🤖 AI 思考中", 30.0, "running", Some(&question));
+
+    let answer = ai::qa_note(&app, &content, &question).await?;
+
+    emit_progress(&app, "qa", "💾 写入笔记", 90.0, "running", None);
+
+    if write_back {
+        // Append to ## 问答记录 section
+        let now = crate::commands::notes::timestamp_now();
+        let qa_entry = format!(
+            "\n\n### {now} — {question}\n\n> **问：** {question}\n\n> **答：** {answer}\n\n📍 参考章节：基于全文笔记\n"
+        );
+
+        let updated = if let Some(pos) = content.rfind("## 大衍决心得") {
+            // Insert before 大衍决心得, after content
+            let mut s = content[..pos].to_string();
+            if let Some(qa_pos) = s.rfind("## 问答记录") {
+                // Append to existing QA section
+                s.insert_str(qa_pos + "## 问答记录".len(), &qa_entry);
+            } else {
+                // Create new QA section before 大衍决心得
+                s.push_str(&format!("\n\n---\n\n## 问答记录\n{qa_entry}"));
+            }
+            s + &content[pos..]
+        } else {
+            // No 大衍决心得 section yet, just append
+            format!("{content}\n\n---\n\n## 问答记录\n{qa_entry}")
+        };
+
+        std::fs::write(&note_path, &updated)
+            .map_err(|e| AppError::Config(format!("写入笔记失败: {e}")))?;
+    }
+
+    emit_progress(&app, "qa", "追问完成", 100.0, "completed",
+        if write_back { Some("已追加到笔记") } else { Some("仅回答，未写入") });
+
+    Ok(answer)
+}
+
 fn check_deps(python_path: &str) -> Result<(), AppError> {
     let output = std::process::Command::new(python_path)
         .args(["--version"])

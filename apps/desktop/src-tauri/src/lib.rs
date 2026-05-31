@@ -13,7 +13,7 @@ use commands::{
     },
     deps::{detect_all_deps, detect_ffmpeg, detect_gpu, detect_python, detect_python_auto, detect_ytdlp},
     fs::{cleanup_temp, copy_asset, pick_folder, read_text_file, scan_directory, write_note},
-    pipeline::execute_pipeline,
+    pipeline::{execute_pipeline, execute_qa},
     python::{
         check_python_env, download_video, download_youtube_subtitles, extract_keyframes,
         install_faster_whisper, list_ai_douyin_tasks, transcribe_audio,

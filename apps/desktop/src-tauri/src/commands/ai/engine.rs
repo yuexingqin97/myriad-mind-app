@@ -123,6 +123,36 @@ pub async fn generate_note(
     Ok(resp.text)
 }
 
+/// 对已有笔记进行追问，返回答案
+pub async fn qa_note(
+    app_handle: &AppHandle,
+    note_content: &str,
+    question: &str,
+) -> Result<String, AppError> {
+    let api_key = read_deepseek_key()?;
+    let system_prompt = format!(
+        "你是一个学习助手。基于以下笔记内容回答用户问题。\n\
+        回答要简洁、结构化，引用笔记中的具体章节。\n\n\
+        笔记内容：\n{note_content}"
+    );
+
+    let req = MindRequest {
+        task: super::types::AiTask::NoteGeneration,
+        messages: vec![super::types::AiMessage {
+            role: "user".into(),
+            content: question.to_string(),
+        }],
+        system_prompt,
+        model_override: Some("deepseek-v4-flash".into()),
+        stream: true,
+        max_tokens: Some(4096),
+        thinking: None,
+    };
+
+    let resp = stream_deepseek(app_handle, &req, &api_key).await?;
+    Ok(resp.text)
+}
+
 /// 测试 DeepSeek 连接
 #[tauri::command]
 pub async fn test_deepseek_connection(app_handle: AppHandle) -> Result<String, AppError> {

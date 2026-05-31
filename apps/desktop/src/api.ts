@@ -282,6 +282,11 @@ export async function pickFolder(): Promise<string | null> {
   return "D:/Notes/MyriadMind";
 }
 
+export async function executeQa(notePath: string, question: string, writeBack: boolean): Promise<string> {
+  if (await ensureTauri()) return tauriInvoke!("execute_qa", { notePath, question, writeBack }) as Promise<string>;
+  return "（浏览器模拟）基于笔记内容的回答...";
+}
+
 export async function testDeepSeekConnection(): Promise<string> {
   if (await ensureTauri()) return tauriInvoke!("test_deepseek_connection") as Promise<string>;
   return "pong — deepseek-v4-flash (browser mock)";

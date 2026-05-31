@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback, useRef } from "react";
 import { type MyriadMindConfig, classifyInput, estimateCost, type TokenEstimate } from "@myriad-mind/core";
 import { Button, Input } from "@myriad-mind/ui";
 import { usePipeline } from "@/hooks/usePipeline";
-import { LogPanel } from "@/components/log/LogPanel";
+import { LogPanel, type LogEntry } from "@/components/log/LogPanel";
+import * as api from "@/api";
+import { isTauri } from "@/lib/platform";
 
 // ---- Props ----
 
@@ -109,44 +111,151 @@ export function InputView({ config }: InputViewProps) {
     }
   }, [inputUrl, config]);
 
-  const showHints = !inputUrl.trim() && !processing && !status;
+  const [mode, setMode] = useState<"new" | "qa">("new");
+  const [qaNotePath, setQaNotePath] = useState("");
+  const [qaQuestion, setQaQuestion] = useState("");
+  const [qaProcessing, setQaProcessing] = useState(false);
+  const [qaLogs, setQaLogs] = useState<LogEntry[]>([]);
+  const [qaAnswer, setQaAnswer] = useState("");
+  const qaLogIdRef = useRef(0);
+
+  const pushQaLog = useCallback((type: LogEntry["type"], text: string) => {
+    qaLogIdRef.current += 1;
+    setQaLogs((prev) => [...prev, { id: qaLogIdRef.current, type, text, timestamp: Date.now() }]);
+  }, []);
+
+  const handleQaSubmit = useCallback(async () => {
+    if (!qaNotePath.trim() || !qaQuestion.trim() || qaProcessing) return;
+    setQaProcessing(true);
+    setQaLogs([]);
+    qaLogIdRef.current = 0;
+    pushQaLog("step", `📖 读取笔记: ${qaNotePath}`);
+    pushQaLog("step", `❓ 提问: ${qaQuestion}`);
+
+    if (await isTauri()) {
+      const unlisten = api.listenPipelineProgress((event) => {
+        if (event.status === "running") pushQaLog("step", event.label);
+        if (event.detail) pushQaLog("info", event.detail);
+        if (event.status === "completed") pushQaLog("success", `✅ ${event.label}`);
+      });
+      try {
+        const answer = await api.executeQa(qaNotePath.trim(), qaQuestion.trim(), true);
+        setQaAnswer(answer);
+        pushQaLog("output", answer);
+        pushQaLog("success", "✅ 回答已追加到笔记");
+      } catch (e) {
+        pushQaLog("error", `❌ ${e}`);
+      } finally {
+        setQaProcessing(false);
+        unlisten();
+      }
+    } else {
+      // Mock
+      await new Promise((r) => setTimeout(r, 1500));
+      const mock = "（浏览器模拟）基于笔记内容的回答：根据笔记内容，最值得复用的方法是...";
+      setQaAnswer(mock);
+      pushQaLog("output", mock);
+      pushQaLog("success", "✅ 回答已追加到笔记");
+      setQaProcessing(false);
+    }
+  }, [qaNotePath, qaQuestion, qaProcessing, pushQaLog]);
+
+  const showHints = mode === "new" && !inputUrl.trim() && !processing && !status;
+  const effectiveLogs = mode === "new" ? logs : qaLogs;
+  const effectiveStreaming = mode === "new" ? streamingText : qaAnswer;
 
   return (
     <div className="view-container view-container-flex">
       <div className="view-header">
         <h2 className="view-title">📥 神识一扫，万物皆可为笔记</h2>
-        <p className="view-subtitle">
-          丢入视频链接 / 文章 URL / 本地文件路径，自动炼化为 AI 摘要 + Mermaid 图表 + 术语表 + 扩展资源的结构化学习笔记
-        </p>
+
+        {/* 模式切换 */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+          <button
+            onClick={() => setMode("new")}
+            style={{
+              padding: "6px 16px", fontSize: 13, fontWeight: 500, borderRadius: 8, border: "none", cursor: "pointer",
+              background: mode === "new" ? "var(--brand-soft, rgba(22,131,255,0.14))" : "transparent",
+              color: mode === "new" ? "var(--brand-primary, #1683ff)" : "var(--text-secondary, #a0a0c0)",
+            }}
+          >
+            🆕 新炼化
+          </button>
+          <button
+            onClick={() => setMode("qa")}
+            style={{
+              padding: "6px 16px", fontSize: 13, fontWeight: 500, borderRadius: 8, border: "none", cursor: "pointer",
+              background: mode === "qa" ? "var(--brand-soft, rgba(22,131,255,0.14))" : "transparent",
+              color: mode === "qa" ? "var(--brand-primary, #1683ff)" : "var(--text-secondary, #a0a0c0)",
+            }}
+          >
+            💬 追问笔记
+          </button>
+        </div>
 
         <div className="input-area">
-          <div className="input-row">
-            <Input
-              placeholder="粘贴链接… 如 https://www.bilibili.com/video/BVxxx/"
-              value={inputUrl}
-              onChange={(e) => setInputUrl(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-            />
-            <input
-              placeholder="子目录（可选）"
-              value={noteCategory}
-              onChange={(e) => setNoteCategory(e.target.value)}
-              disabled={processing}
-              style={{
-                width: 130, padding: "8px 10px", fontSize: 13, borderRadius: 8,
-                border: "1px solid var(--border-default, #383a43)",
-                background: "var(--bg-input, #1f2026)",
-                color: "var(--text, #e0e0f0)", outline: "none",
-              }}
-              title="留空自动分类 · 如 Rust / AI / Rust/异步编程"
-            />
-            <Button onClick={submit} disabled={!inputUrl.trim() || processing} loading={processing}>
-              炼化
-            </Button>
-          </div>
-
-          {/* ---- 本次要求（可折叠）---- */}
-          <TaskPromptInput value={taskPrompt} onChange={setTaskPrompt} disabled={processing} />
+          {mode === "new" ? (
+            <>
+              <div className="input-row">
+                <Input
+                  placeholder="粘贴链接… 如 https://www.bilibili.com/video/BVxxx/"
+                  value={inputUrl}
+                  onChange={(e) => setInputUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submit()}
+                />
+                <input
+                  placeholder="子目录（可选）"
+                  value={noteCategory}
+                  onChange={(e) => setNoteCategory(e.target.value)}
+                  disabled={processing}
+                  style={{
+                    width: 130, padding: "8px 10px", fontSize: 13, borderRadius: 8,
+                    border: "1px solid var(--border-default, #383a43)",
+                    background: "var(--bg-input, #1f2026)",
+                    color: "var(--text, #e0e0f0)", outline: "none",
+                  }}
+                  title="留空自动分类"
+                />
+                <Button onClick={submit} disabled={!inputUrl.trim() || processing} loading={processing}>
+                  炼化
+                </Button>
+              </div>
+              <TaskPromptInput value={taskPrompt} onChange={setTaskPrompt} disabled={processing} />
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <input
+                  placeholder="笔记路径… 如 D:/Notes/MyriadMind/Rust/xxx.md"
+                  value={qaNotePath}
+                  onChange={(e) => setQaNotePath(e.target.value)}
+                  disabled={qaProcessing}
+                  style={{
+                    padding: "10px 12px", fontSize: 13, borderRadius: 8,
+                    border: "1px solid var(--border-default, #383a43)",
+                    background: "var(--bg-input, #1f2026)", color: "var(--text, #e0e0f0)", outline: "none",
+                  }}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    placeholder="你想追问什么？"
+                    value={qaQuestion}
+                    onChange={(e) => setQaQuestion(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleQaSubmit()}
+                    disabled={qaProcessing}
+                    style={{
+                      flex: 1, padding: "10px 12px", fontSize: 13, borderRadius: 8,
+                      border: "1px solid var(--border-default, #383a43)",
+                      background: "var(--bg-input, #1f2026)", color: "var(--text, #e0e0f0)", outline: "none",
+                    }}
+                  />
+                  <Button onClick={handleQaSubmit} disabled={!qaNotePath.trim() || !qaQuestion.trim() || qaProcessing} loading={qaProcessing}>
+                    追问
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* ---- 支持的输入内容（仅空输入时显示）---- */}
           {showHints && (
@@ -226,7 +335,7 @@ export function InputView({ config }: InputViewProps) {
         </div>
       </div>
 
-      <LogPanel entries={logs} streamingText={streamingText} />
+      <LogPanel entries={effectiveLogs} streamingText={effectiveStreaming} />
     </div>
   );
 }
