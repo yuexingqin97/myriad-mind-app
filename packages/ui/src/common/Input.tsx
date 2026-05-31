@@ -132,7 +132,7 @@ export function Toggle({ label, description, checked, onChange, disabled = false
           position: "relative", display: "inline-flex",
           height: 20, width: 36, flexShrink: 0,
           borderRadius: 10, border: "2px solid transparent",
-          background: checked ? "#6366f1" : "#2a2a4a",
+          background: checked ? "var(--brand-primary)" : "#2a2a4a",
           transition: "background 0.2s", outline: "none",
           cursor: disabled ? "not-allowed" : "pointer",
           marginTop: 2,

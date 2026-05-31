@@ -2,7 +2,7 @@
 // 大衍决 core types — 跨平台共享类型定义
 // ============================================================
 
-// ---- 输入模式 (8 种) ----
+// ---- 输入模式 (9 种) ----
 export type InputMode =
   | "bilibili"
   | "youtube"
@@ -11,7 +11,8 @@ export type InputMode =
   | "article_url"
   | "local_video"
   | "local_audio"
-  | "local_text";
+  | "local_text"
+  | "code_project";
 
 // ---- 管线步骤 ----
 export type PipelineStep =

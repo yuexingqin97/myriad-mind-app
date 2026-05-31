@@ -25,6 +25,7 @@ const BASE_ESTIMATES: Record<
   local_video: { inputTokens: 40000, outputTokens: 15000, baseMinutes: 6, label: "本地视频" },
   local_audio: { inputTokens: 25000, outputTokens: 12000, baseMinutes: 4, label: "本地音频" },
   local_text: { inputTokens: 10000, outputTokens: 6000, baseMinutes: 1, label: "本地文档" },
+  code_project: { inputTokens: 60000, outputTokens: 25000, baseMinutes: 8, label: "代码项目" },
 };
 
 /**

@@ -15,7 +15,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const variantMap: Record<ButtonVariant, React.CSSProperties> = {
-  primary: { background: "#6366f1", color: "#fff", border: "none", boxShadow: "0 1px 4px rgba(99,102,241,0.3)" },
+  primary: { background: "var(--brand-primary)", color: "#fff", border: "none", boxShadow: "0 1px 4px rgba(99,102,241,0.3)" },
   secondary: { background: "#1f2937", color: "#e5e7eb", border: "1px solid #374151" },
   danger: { background: "rgba(239,68,68,0.9)", color: "#fff", border: "none", boxShadow: "0 1px 4px rgba(239,68,68,0.2)" },
   ghost: { background: "transparent", color: "#9ca3af", border: "none" },

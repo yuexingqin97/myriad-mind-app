@@ -86,17 +86,24 @@ const CODE_EXT = new Set([
 
 /**
  * 判断输入类型
+ * @param input 用户输入（URL 或路径）
+ * @param files 目录文件列表（仅目录输入时使用，用于判断代码占比）
  */
-export function classifyInput(input: string): ClassifyResult {
+export function classifyInput(input: string, files?: string[]): ClassifyResult {
   const trimmed = input.trim();
 
-  // 1. 检查是否为 URL
+  // 1. Git SSH URL (git@github.com:user/repo.git)
+  if (/^git@[\w.-]+:[\w.-]+\/[\w.-]+(\.git)?$/i.test(trimmed)) {
+    return classifyGitUrl(trimmed);
+  }
+
+  // 2. 检查是否为 HTTP(S) URL
   if (/^https?:\/\//i.test(trimmed)) {
     return classifyUrl(trimmed);
   }
 
-  // 2. 检查是否为本地路径
-  return classifyLocalPath(trimmed);
+  // 3. 检查是否为本地路径
+  return classifyLocalPath(trimmed, files);
 }
 
 /**
@@ -133,18 +140,12 @@ function classifyUrl(url: string): ClassifyResult {
     }
   }
 
-  // 检查 GitHub URL
+  // 检查 Git 平台 URL
   if (/github\.com\/[^/]+\/[^/]+/i.test(url)) {
-    const match = url.match(/github\.com\/([^/]+)\/([^/?#]+)/i);
-    return {
-      mode: "local_text", // GitHub → 代码模式由上层路由
-      platform: "GitHub",
-      confidence: 0.8,
-      needsFFmpeg: false,
-      needsDownload: true, // 需要 git clone
-      isLocal: false,
-      extractedId: match ? `${match[1]}/${match[2]}` : undefined,
-    };
+    return classifyGitUrl(url);
+  }
+  if (/gitlab\.com\/[^/]+\/[^/]+/i.test(url) || /gitee\.com\/[^/]+\/[^/]+/i.test(url)) {
+    return classifyGitUrl(url);
   }
 
   // 通用 URL → 尝试文章模式
@@ -159,16 +160,72 @@ function classifyUrl(url: string): ClassifyResult {
 }
 
 /**
+ * Git 仓库 URL 分类（HTTP + SSH）
+ */
+function classifyGitUrl(url: string): ClassifyResult {
+  // 提取 owner/repo
+  let match = url.match(/github\.com\/([^/]+)\/([^/?#]+)/i);
+  if (!match) match = url.match(/gitlab\.com\/([^/]+)\/([^/?#]+)/i);
+  if (!match) match = url.match(/gitee\.com\/([^/]+)\/([^/?#]+)/i);
+  if (!match) match = url.match(/git@([\w.]+):([\w.-]+)\/([\w.-]+)(\.git)?$/i);
+
+  let platform = "GitHub";
+  if (/gitlab/i.test(url)) platform = "GitLab";
+  if (/gitee/i.test(url)) platform = "Gitee";
+
+  const repo = match
+    ? (match[2] && match[3] ? `${match[2]}/${match[3]}`.replace(/\.git$/i, "") : `${match[1]}/${match[2]}`.replace(/\.git$/i, ""))
+    : undefined;
+
+  return {
+    mode: "code_project",
+    platform,
+    confidence: 0.9,
+    needsFFmpeg: false,
+    needsDownload: true, // 需要 git clone
+    isLocal: false,
+    extractedId: repo,
+  };
+}
+
+/**
  * 本地路径分类
  */
-function classifyLocalPath(path: string): ClassifyResult {
-  // 检测是否为目录
+function classifyLocalPath(path: string, files?: string[]): ClassifyResult {
+  // 检测是否为目录（路径以分隔符结尾，或无扩展名且路径存在子目录特征）
   const dirPattern = /[\/\\]$/;
-  if (dirPattern.test(path)) {
+  const hasExtension = /\.[a-zA-Z0-9]{1,6}$/.test(path.trimEnd());
+
+  if (dirPattern.test(path) || (!hasExtension && files)) {
+    // 有文件列表 → 判断代码占比
+    if (files && files.length > 0) {
+      const isCode = isCodeProject(files);
+      const codeRatio = files.filter((f) => {
+        const ext = f.match(/\.\w+$/)?.[0]?.toLowerCase() ?? "";
+        return CODE_EXT.has(ext);
+      }).length / files.length;
+
+      return {
+        mode: isCode ? "code_project" : "local_text",
+        platform: isCode
+          ? `代码项目（${Math.round(codeRatio * 100)}% 代码文件）`
+          : `本地目录（${files.length} 个文件）`,
+        confidence: isCode ? 0.85 : 0.8,
+        needsFFmpeg: false,
+        needsDownload: false,
+        isLocal: true,
+      };
+    }
+
+    // 无文件列表 → 按目录名猜测
+    const dirName = path.replace(/[\/\\]+$/, "").split(/[\/\\]/).pop()?.toLowerCase() ?? "";
+    const codeHints = ["code", "project", "repo", "src", "engine", "bevy", "rust", "git", "app", "lib", "crate"];
+    const isLikelyCode = codeHints.some((hint) => dirName.includes(hint));
+
     return {
-      mode: "local_text", // 目录模式由上层根据文件列表判断
-      platform: "本地目录",
-      confidence: 0.8,
+      mode: isLikelyCode ? "code_project" : "local_text",
+      platform: isLikelyCode ? "代码项目（推测）" : "本地目录",
+      confidence: isLikelyCode ? 0.6 : 0.7,
       needsFFmpeg: false,
       needsDownload: false,
       isLocal: true,
@@ -206,6 +263,18 @@ function classifyLocalPath(path: string): ClassifyResult {
     return {
       mode: "local_text",
       platform: `本地文档 (.${ext})`,
+      confidence: 0.9,
+      needsFFmpeg: false,
+      needsDownload: false,
+      isLocal: true,
+      extractedId: extractFilename(path),
+    };
+  }
+
+  if (CODE_EXT.has(ext)) {
+    return {
+      mode: "code_project",
+      platform: `代码文件 (.${ext})`,
       confidence: 0.9,
       needsFFmpeg: false,
       needsDownload: false,

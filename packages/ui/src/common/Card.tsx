@@ -19,7 +19,7 @@ const variantMap: Record<string, React.CSSProperties> = {
   default: { background: "#1a1a2e", border: "1px solid #2a2a4a" },
   bordered: { background: "#1a1a2e", border: "2px solid rgba(99,102,241,0.5)", boxShadow: "0 1px 8px rgba(99,102,241,0.1)" },
   elevated: { background: "#1e1e36", border: "1px solid #2a2a4a", boxShadow: "0 8px 24px rgba(0,0,0,0.3)" },
-  accent: { background: "#1a1a2e", border: "1px solid #2a2a4a", borderLeft: "4px solid #6366f1" },
+  accent: { background: "#1a1a2e", border: "1px solid #2a2a4a", borderLeft: "4px solid var(--brand-primary)" },
 };
 
 const paddingMap: Record<string, React.CSSProperties> = {

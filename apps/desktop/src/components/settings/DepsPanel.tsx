@@ -4,8 +4,8 @@
 // ============================================================
 
 import { useEffect, useState } from "react";
-import * as api from "../api";
-import type { DepResult } from "../api";
+import * as api from "@/api";
+import type { DepResult } from "@/api";
 
 interface DepsPanelProps {
   /** 配置中的 Python 路径，传给 Rust detect_all_deps */

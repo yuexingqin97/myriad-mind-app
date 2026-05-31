@@ -23,6 +23,7 @@ pub enum InputMode {
     #[serde(rename = "local_video")] LocalVideo,
     #[serde(rename = "local_audio")] LocalAudio,
     #[serde(rename = "local_text")] LocalText,
+    #[serde(rename = "code_project")] CodeProject,
 }
 
 impl std::fmt::Display for InputMode {
@@ -36,6 +37,7 @@ impl std::fmt::Display for InputMode {
             Self::LocalVideo => write!(f, "本地视频"),
             Self::LocalAudio => write!(f, "本地音频"),
             Self::LocalText => write!(f, "本地文档"),
+            Self::CodeProject => write!(f, "代码项目"),
         }
     }
 }
@@ -99,7 +101,7 @@ pub async fn execute_pipeline(
         InputMode::LocalAudio => {
             run_audio_pipeline(&app, &input, &py, &note_dir).await
         }
-        InputMode::ArticleUrl | InputMode::LocalText => {
+        InputMode::ArticleUrl | InputMode::LocalText | InputMode::CodeProject => {
             run_text_pipeline(&app, &input, &note_dir).await
         }
     };

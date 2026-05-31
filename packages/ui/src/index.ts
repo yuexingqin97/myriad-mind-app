@@ -31,7 +31,7 @@ export type { ConfigWizardProps, KeychainApi } from "./ConfigWizard.js";
 
 // SettingsPage (常规设置页)
 export { SettingsPage } from "./SettingsPage.js";
-export type { SettingsPageProps } from "./SettingsPage.js";
+export type { SettingsPageProps, ThemeMode } from "./SettingsPage.js";
 
 // NoteRenderer
 export { NoteRenderer, renderMarkdown } from "./NoteRenderer.js";
@@ -41,5 +41,14 @@ export type { NoteRendererProps } from "./NoteRenderer.js";
 export { Dashboard } from "./Dashboard.js";
 export type { DashboardProps } from "./Dashboard.js";
 
+// Types
+export type {
+  DepInfo,
+  DepsInfo,
+  SetupIntent,
+  HealthStatus,
+  HealthItem,
+} from "./types.js";
+
 // Version
-export const UI_VERSION = "0.2.0";
+export const UI_VERSION = "0.3.0";
