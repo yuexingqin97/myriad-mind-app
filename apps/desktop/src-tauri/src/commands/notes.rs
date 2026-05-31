@@ -301,7 +301,7 @@ fn generate_metadata_block(
     )
 }
 
-fn timestamp_now() -> String {
+pub fn timestamp_now() -> String {
     use std::time::SystemTime;
     let dur = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -327,7 +327,7 @@ fn timestamp_now() -> String {
     format!("{year:04}-{mon:02}-{d:02} {h:02}:{m:02}:{s:02}")
 }
 
-fn simple_hash(input: &str) -> String {
+pub fn simple_hash(input: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();

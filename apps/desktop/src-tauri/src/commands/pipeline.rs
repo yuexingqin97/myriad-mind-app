@@ -304,6 +304,11 @@ async fn run_text_pipeline(
     };
     emit_progress(app, "classify", &format!("内容类型: {content_type}"), 40.0, "completed", None);
 
+    // 确保 .myriad-mind/ 索引存在
+    emit_progress(app, "library", "📚 检查知识库索引", 42.0, "running", None);
+    let _ = crate::commands::library::ensure_library(note_dir);
+    emit_progress(app, "library", "索引就绪", 45.0, "completed", None);
+
     emit_progress(app, "generate_note", "🤖 AI 生成笔记 (DeepSeek V4 Pro)", 50.0, "running",
         Some("正在调用 AI 模型，流式输出中…"));
 
@@ -318,6 +323,14 @@ async fn run_text_pipeline(
                 &note, input, source_type, note_dir, note_category, debug_metadata,
             ) {
                 Ok(result) => {
+                    // 更新 .myriad-mind 索引
+                    let fingerprint = crate::commands::notes::simple_hash(input);
+                    let note_id = format!("note_{fingerprint}");
+                    let _ = crate::commands::library::update_library_after_save(
+                        note_dir, &result.path, &result.title, &result.category,
+                        result.version, input, source_type, &fingerprint, &note_id, &note,
+                    );
+
                     let detail = format!(
                         "📁 {}/{}.md\n📝 v{} · {} 字符",
                         result.category, result.title, result.version, note.len()
