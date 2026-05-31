@@ -74,6 +74,7 @@ pub async fn execute_pipeline(
     python_path: Option<String>,
     note_dir: String,
     note_category: Option<String>,
+    debug_metadata: Option<bool>,
 ) -> Result<PipelineResult, AppError> {
     let start = std::time::Instant::now();
     let input_mode: InputMode =
@@ -104,7 +105,7 @@ pub async fn execute_pipeline(
             run_audio_pipeline(&app, &input, &py, &note_dir).await
         }
         InputMode::ArticleUrl | InputMode::LocalText | InputMode::CodeProject => {
-            run_text_pipeline(&app, &input, &note_dir, note_category.as_deref()).await
+            run_text_pipeline(&app, &input, &note_dir, note_category.as_deref(), debug_metadata.unwrap_or(false)).await
         }
     };
 
@@ -273,6 +274,7 @@ async fn run_text_pipeline(
     input: &str,
     note_dir: &str,
     note_category: Option<&str>,
+    debug_metadata: bool,
 ) -> Result<(), AppError> {
     emit_progress(app, "read", "读取内容", 15.0, "running", None);
 
@@ -313,7 +315,7 @@ async fn run_text_pipeline(
             // 自动分类并保存
             let source_type = if input.starts_with("http") { "article" } else { "file" };
             match crate::commands::notes::save_note(
-                &note, input, source_type, note_dir, note_category,
+                &note, input, source_type, note_dir, note_category, debug_metadata,
             ) {
                 Ok(result) => {
                     let detail = format!(

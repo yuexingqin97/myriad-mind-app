@@ -257,6 +257,7 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
           pythonPath: config.python_path || null,
           noteDir: config.output.note_dir || "",
           noteCategory: noteCategory || null,
+          debugMetadata: config.output.debug_metadata ?? false,
         }) as { success: boolean; mode: string; duration_seconds: number };
         if (result.success) {
           setProgress(100);
