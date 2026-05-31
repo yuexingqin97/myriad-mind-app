@@ -99,7 +99,7 @@ pub fn save_note(
         &title, &category, version, source_type, source_input, &fingerprint,
     );
 
-    // 组装最终内容: 正文 + ## 大衍决心得(更新记录 + 问答 + 调试 + 元信息)
+    // 组装最终内容: 正文 + ## 大衍决心得 (更新记录 + 问答 + 元信息 + 调试信息)
     let mut final_content = ai_output.to_string();
     final_content.push_str("\n\n---\n\n## 大衍决心得\n\n### 更新记录\n\n");
     final_content.push_str(&update_rows);
@@ -107,10 +107,10 @@ pub fn save_note(
     if !old_qa.is_empty() {
         final_content.push_str(&format!("\n\n### 问答记录\n\n{old_qa}"));
     }
+    final_content.push_str(&format!("\n\n### 元信息\n\n> 以下为应用读取用元信息。手动编辑可能影响去重、追问和修为统计。\n\n{metadata_block}"));
     if !debug_section.is_empty() {
         final_content.push_str(&debug_section);
     }
-    final_content.push_str(&format!("\n\n### 元信息\n\n> 以下为应用读取用元信息。手动编辑可能影响去重、追问和修为统计。\n\n{metadata_block}"));
 
     std::fs::write(&note_path, &final_content)
         .map_err(|e| AppError::Config(format!("写入笔记失败: {e}")))?;
@@ -303,11 +303,28 @@ fn generate_metadata_block(
 
 fn timestamp_now() -> String {
     use std::time::SystemTime;
-    let ts = SystemTime::now()
+    let dur = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format!("{ts}")
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+    // Convert to days since epoch, then to YMD
+    let days = (secs / 86400) as i64;
+    let time_of_day = secs % 86400;
+    let h = time_of_day / 3600;
+    let m = (time_of_day % 3600) / 60;
+    let s = time_of_day % 60;
+    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mon = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if mon <= 2 { y + 1 } else { y };
+    format!("{year:04}-{mon:02}-{d:02} {h:02}:{m:02}:{s:02}")
 }
 
 fn simple_hash(input: &str) -> String {

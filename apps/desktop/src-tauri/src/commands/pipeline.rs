@@ -319,7 +319,7 @@ async fn run_text_pipeline(
             ) {
                 Ok(result) => {
                     let detail = format!(
-                        "📁 {}/{}/\n📝 v{} · {} 字符",
+                        "📁 {}/{}.md\n📝 v{} · {} 字符",
                         result.category, result.title, result.version, note.len()
                     );
                     emit_progress(app, "save", "笔记已保存", 98.0, "completed", Some(&detail));
