@@ -100,7 +100,7 @@ pub async fn execute_pipeline(
     let result = match input_mode {
         InputMode::Bilibili | InputMode::Youtube | InputMode::Douyin
         | InputMode::Xiaohongshu | InputMode::LocalVideo => {
-            run_video_pipeline(&app, &input, &input_mode, &py, &note_dir).await
+            run_video_pipeline(&app, &input, &input_mode, &py, &note_dir, note_category.as_deref(), task_prompt.as_deref(), debug_metadata.unwrap_or(false)).await
         }
         InputMode::LocalAudio => {
             run_audio_pipeline(&app, &input, &py, &note_dir).await
@@ -147,7 +147,10 @@ async fn run_video_pipeline(
     input: &str,
     mode: &InputMode,
     python_path: &str,
-    _note_dir: &str,
+    note_dir: &str,
+    note_category: Option<&str>,
+    task_prompt: Option<&str>,
+    debug_metadata: bool,
 ) -> Result<(), AppError> {
     let video_id = generate_temp_id(input);
     let temp_dir = std::env::temp_dir().join("myriad-mind").join(&video_id);
@@ -155,44 +158,59 @@ async fn run_video_pipeline(
 
     let video_path = temp_dir.join("video.mp4");
     let audio_path = temp_dir.join("audio.mp3");
+    let mut video_title = String::new();
 
     // ---- 下载 / 本地准备 ----
     if matches!(mode, InputMode::Bilibili | InputMode::Youtube | InputMode::Douyin | InputMode::Xiaohongshu) {
-        emit_progress(app, "download", "下载视频", 15.0, "running", None);
-        // TODO: 调用 download_video / download_youtube_subtitles
-        // 当前阶段: 下载逻辑待 AI Douyin / TikHub 对接
-        emit_progress(app, "download", "下载（待接入解析 API）", 25.0, "completed",
-            Some("需配置 AI Douyin / TikHub API Key"));
+        emit_progress(app, "download", "📥 下载视频", 10.0, "running",
+            Some(&format!("平台: {mode}")));
+        match download_video_ytdlp(input, mode, &video_path) {
+            Ok(title) => {
+                video_title = title;
+                emit_progress(app, "download", &format!("下载完成: {video_title}"), 25.0, "completed",
+                    Some(&format!("文件: {}", video_path.display())));
+            }
+            Err(e) => {
+                emit_progress(app, "download", &format!("下载失败: {e}"), 25.0, "failed",
+                    Some("请检查 yt-dlp 是否安装、网络是否正常"));
+                log::error!("[pipeline] download failed: {e}");
+            }
+        }
     } else {
         // 本地视频: 直接复制到 temp
         let src = PathBuf::from(input);
         if src.exists() {
             std::fs::copy(&src, &video_path).map_err(AppError::Io)?;
+            video_title = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
         }
         emit_progress(app, "prepare", "准备本地视频", 20.0, "completed", None);
     }
 
     // ---- 提取音频 ----
-    emit_progress(app, "extract_audio", "提取音频", 30.0, "running", None);
+    emit_progress(app, "extract_audio", "🎵 提取音频", 30.0, "running", None);
     if video_path.exists() {
-        extract_audio_ffmpeg(&video_path, &audio_path)?;
+        match extract_audio_ffmpeg(&video_path, &audio_path) {
+            Ok(()) => emit_progress(app, "extract_audio", "音频提取完成", 40.0, "completed", None),
+            Err(e) => {
+                emit_progress(app, "extract_audio", &format!("音频提取失败: {e}"), 40.0, "failed", None);
+            }
+        }
     }
-    let audio_detail = if audio_path.exists() { "音频提取完成" } else { "无音频轨道，跳过" };
-    emit_progress(app, "extract_audio", audio_detail, 40.0, "completed", None);
 
     // ---- ASR 转写 ----
-    emit_progress(app, "transcribe", "语音转写", 45.0, "running", None);
+    emit_progress(app, "transcribe", "🎙️ 语音转写 (faster-whisper)", 45.0, "running",
+        Some("可能需要几分钟，取决于音频长度…"));
+    let mut text_content = String::new();
     if audio_path.exists() {
         match transcribe_with_python(python_path, &audio_path, &temp_dir) {
             Ok(text_path) => {
-                let text = std::fs::read_to_string(&text_path).unwrap_or_default();
-                let detail = format!("转写完成 ({}字)", text.chars().count());
-                emit_progress(app, "transcribe", &detail, 60.0, "completed", None);
+                text_content = std::fs::read_to_string(&text_path).unwrap_or_default();
+                let chars = text_content.chars().count();
+                emit_progress(app, "transcribe", &format!("转写完成 · {} 字符", chars), 60.0, "completed", None);
             }
             Err(e) => {
                 emit_progress(app, "transcribe", &format!("转写失败: {e}"), 60.0, "failed",
-                    Some("检查 Python + faster-whisper 是否安装"));
-                // 不中断: 后续 AI 可以基于有限内容生成笔记
+                    Some("请检查 Python 环境: pip install faster-whisper"));
             }
         }
     } else {
@@ -200,32 +218,56 @@ async fn run_video_pipeline(
     }
 
     // ---- 关键帧截图 ----
-    emit_progress(app, "keyframes", "提取关键帧", 65.0, "running", None);
+    emit_progress(app, "keyframes", "🖼️ 提取关键帧", 65.0, "running", None);
     if video_path.exists() {
         match extract_keyframes_with_python(python_path, &video_path, &temp_dir) {
-            Ok(frame_dir) => {
-                let count = std::fs::read_dir(&frame_dir).map(|r| r.count()).unwrap_or(0);
-                emit_progress(app, "keyframes", &format!("提取了 {count} 帧截图", ), 70.0, "completed", None);
+            Ok(_frame_dir) => {
+                emit_progress(app, "keyframes", "关键帧提取完成", 70.0, "completed", None);
             }
             Err(e) => {
-                emit_progress(app, "keyframes", &format!("关键帧提取失败: {e}"), 70.0, "completed",
+                emit_progress(app, "keyframes", &format!("关键帧跳过: {e}"), 70.0, "completed",
                     Some("不影响笔记生成"));
             }
         }
-    } else {
-        emit_progress(app, "keyframes", "无视频文件，跳过", 70.0, "completed", None);
     }
 
     // ---- AI 笔记生成 ----
-    emit_progress(app, "generate_note", "AI 生成笔记", 75.0, "running", None);
-    let text_path = temp_dir.join("text.txt");
-    if text_path.exists() {
-        // TODO: 接入 MindEngine 流式生成
-        emit_progress(app, "generate_note", "笔记生成完成", 90.0, "completed",
-            Some("（待接入 DeepSeek API Key）"));
+    let ai_input = if text_content.is_empty() {
+        format!("视频标题: {video_title}\n\n（未能提取音频文本，请基于标题生成简要笔记）")
     } else {
-        emit_progress(app, "generate_note", "无文本内容可分析", 90.0, "completed",
-            Some("请先完成下载/转写步骤"));
+        format!("视频标题: {video_title}\n\n字幕文本:\n{text_content}")
+    };
+
+    emit_progress(app, "generate_note", "🤖 AI 生成笔记 (DeepSeek V4 Pro)", 75.0, "running",
+        Some("正在调用 AI 模型…"));
+    match ai::generate_note(app, &ai_input, "视频", Some(note_dir), task_prompt).await {
+        Ok(note) => {
+            emit_progress(app, "save", "💾 保存笔记", 90.0, "running", None);
+            let source_type = if matches!(mode, InputMode::Bilibili) { "bilibili" } else { "file" };
+            match crate::commands::notes::save_note(
+                &note, input, source_type, note_dir, note_category, debug_metadata, None,
+            ) {
+                Ok(result) => {
+                    let fingerprint = crate::commands::notes::simple_hash(input);
+                    let note_id = format!("note_{}", &fingerprint);
+                    let _ = crate::commands::library::update_library_after_save(
+                        note_dir, &result.path, &result.title, &result.category,
+                        result.version, input, source_type, &fingerprint, &note_id, &note,
+                    );
+                    emit_progress(app, "completed", &format!("炼化完成 ✅ · {} / v{}", result.title, result.version),
+                        100.0, "completed",
+                        Some(&format!("📁 {}/{}.md · {} 字符", result.category, result.title, note.len())));
+                }
+                Err(e) => {
+                    emit_progress(app, "save", &format!("保存失败: {e}"), 95.0, "failed", None);
+                    return Err(e);
+                }
+            }
+        }
+        Err(e) => {
+            emit_progress(app, "generate_note", &format!("AI 生成失败: {e}"), 80.0, "failed", None);
+            return Err(e);
+        }
     }
 
     Ok(())
@@ -539,6 +581,26 @@ fn check_deps(python_path: &str) -> Result<(), AppError> {
     Err(AppError::MissingDependency(format!(
         "Python 不可用: {python_path}"
     )))
+}
+
+/// Download video using yt-dlp
+fn download_video_ytdlp(url: &str, _mode: &InputMode, output: &std::path::Path) -> Result<String, AppError> {
+    let output_str = output.to_string_lossy();
+    log::info!("[download] yt-dlp: {url}");
+    let mut cmd = std::process::Command::new("yt-dlp");
+    cmd.args([
+        "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+        "--merge-output-format", "mp4",
+        "-o", &output_str,
+        "--print", "%(title)s",
+        "--no-playlist",
+        url,
+    ]);
+    let r = cmd.output().map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
+    if !r.status.success() {
+        return Err(AppError::Config(String::from_utf8_lossy(&r.stderr).to_string()));
+    }
+    Ok(String::from_utf8_lossy(&r.stdout).lines().last().unwrap_or("未知标题").trim().to_string())
 }
 
 fn extract_audio_ffmpeg(video: &PathBuf, audio: &PathBuf) -> Result<(), AppError> {
