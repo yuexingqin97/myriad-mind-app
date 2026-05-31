@@ -13,7 +13,9 @@ async function ensureTauri() {
     const { invoke } = await import("@tauri-apps/api/core");
     const { listen } = await import("@tauri-apps/api/event");
     tauriInvoke = invoke;
-    tauriListen = listen;
+    // Tauri 2.x wraps events in { payload, id }: unwrap before passing to handler
+    tauriListen = (event: string, handler: (p: unknown) => void) =>
+      listen<unknown>(event, (e) => handler(e.payload));
     return true;
   } catch {
     console.warn("[myriad-mind] Not running inside Tauri — using mock mode");
