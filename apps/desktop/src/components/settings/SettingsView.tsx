@@ -14,6 +14,8 @@ interface SettingsViewProps {
   onSave: (c: MyriadMindConfig) => void;
   firstLaunch: boolean;
   onFinishWizard: () => void;
+  /** 导航到炼化页（完成向导后） */
+  onNavigateToInput?: () => void;
 }
 
 // ---- Helpers ----
@@ -25,8 +27,8 @@ function toDepInfo(d: DepResult | undefined) {
 
 // ---- Component ----
 
-export function SettingsView({ config, onSave, firstLaunch, onFinishWizard }: SettingsViewProps) {
-  const showWizard = firstLaunch;
+export function SettingsView({ config, onSave, firstLaunch, onFinishWizard, onNavigateToInput }: SettingsViewProps) {
+  const [showWizard, setShowWizard] = useState(firstLaunch);
   const [deps, setDeps] = useState<DepsInfo | undefined>(undefined);
   const { theme, setTheme } = useTheme();
 
@@ -69,8 +71,15 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard }: Se
       {showWizard ? (
         <ConfigWizard
           config={config}
-          onSave={onSave}
-          onCancel={onFinishWizard}
+          onSave={(c, action) => {
+            onSave(c);
+            if (action === "go_input") {
+              onNavigateToInput?.();
+            } else {
+              onFinishWizard();
+            }
+          }}
+          onCancel={() => { setShowWizard(false); onFinishWizard(); }}
           keychain={keychainAdapter}
           deps={deps}
           onRecheckDeps={detectDeps}
@@ -84,7 +93,7 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard }: Se
             keychain={keychainAdapter}
             deps={deps}
             onRecheckDeps={detectDeps}
-            onOpenWizard={() => { /* TBD: force re-open wizard */ }}
+            onOpenWizard={() => setShowWizard(true)}
             onSelectOutputDir={async () => { /* TBD: Tauri dialog */ return null; }}
             onOpenOutputDir={() => { /* TBD: open in explorer */ }}
             theme={theme}

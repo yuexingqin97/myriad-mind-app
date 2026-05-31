@@ -24,6 +24,7 @@ function App() {
             onSave={saveConfig}
             firstLaunch={firstLaunch}
             onFinishWizard={finishWizard}
+            onNavigateToInput={() => setView("input")}
           />
         )}
       </main>

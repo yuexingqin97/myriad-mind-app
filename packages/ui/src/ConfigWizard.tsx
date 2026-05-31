@@ -12,7 +12,8 @@ import type { DepsInfo, SetupIntent } from "./types.js";
 
 export interface ConfigWizardProps {
   config: MyriadMindConfig;
-  onSave: (config: MyriadMindConfig) => void;
+  /** 保存回调 — action: "go_input" 跳转炼化页, "stay_settings" 留在设置 */
+  onSave: (config: MyriadMindConfig, action: "go_input" | "stay_settings") => void;
   onCancel?: () => void;
   /** 密钥链操作接口 */
   keychain?: KeychainApi;
@@ -69,10 +70,6 @@ export function ConfigWizard({
   const isFirst = step === 0;
   const isLast = step === STEPS.length - 1;
 
-  const handleSave = () => {
-    onSave(config);
-  };
-
   // Step-specific "next" availability
   const canProceed = (() => {
     if (step === 0) return true; // welcome always ok
@@ -96,11 +93,15 @@ export function ConfigWizard({
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {onCancel && (
+            {onCancel && !isLast && (
               <Button variant="ghost" onClick={onCancel}>取消</Button>
             )}
             {isLast ? (
-              <Button onClick={handleSave}>✅ 完成并保存</Button>
+              <>
+                <Button variant="secondary" onClick={() => setStep((s) => s - 1)}>← 返回修改</Button>
+                <Button variant="secondary" onClick={() => onSave(config, "stay_settings")}>💾 保存后留在设置</Button>
+                <Button onClick={() => onSave(config, "go_input")}>🚀 完成并开始炼化</Button>
+              </>
             ) : (
               <Button onClick={() => setStep((s) => s + 1)} disabled={!canProceed}>下一步 →</Button>
             )}
