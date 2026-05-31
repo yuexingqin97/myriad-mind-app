@@ -228,11 +228,11 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
             break;
           case "usage":
             lastUsageRef.current = {
-              inputTokens: event.inputTokens,
-              outputTokens: event.outputTokens,
-              totalTokens: event.totalTokens,
+              inputTokens: event.input_tokens,
+              outputTokens: event.output_tokens,
+              totalTokens: event.total_tokens,
             };
-            pushLog("info", `📊 Token · input: ${event.inputTokens ?? "?"}  output: ${event.outputTokens ?? "?"}  total: ${event.totalTokens ?? "?"}`);
+            pushLog("info", `📊 Token · input: ${event.input_tokens ?? "?"}  output: ${event.output_tokens ?? "?"}  total: ${event.total_tokens ?? "?"}`);
             break;
           case "done": {
             // 推送剩余文本

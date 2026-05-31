@@ -233,11 +233,12 @@ export interface MindStreamEvent {
   model?: string;
   delta?: string;
   text?: string;
-  finishReason?: string;
-  inputTokens?: number;
-  outputTokens?: number;
-  reasoningTokens?: number;
-  totalTokens?: number;
+  finish_reason?: string;
+  // Tauri serializes Rust snake_case → JS receives snake_case
+  input_tokens?: number;
+  output_tokens?: number;
+  reasoning_tokens?: number;
+  total_tokens?: number;
   code?: string;
   message?: string;
   retryable?: boolean;
