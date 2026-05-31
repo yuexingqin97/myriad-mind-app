@@ -189,6 +189,36 @@ function WelcomeStep({ intent, onChange }: { intent: SetupIntent; onChange: (v: 
 // Step 1: Deps — 系统依赖检查
 // ============================================================
 
+// ---- 依赖详情配置 ----
+
+const DEP_DETAILS: Array<{
+  key: string; label: string; icon: string;
+  usage: string;         // 用途说明
+  fixHint: string;       // 如何安装
+  critical: boolean;
+}> = [
+  {
+    key: "python", label: "Python", icon: "🐍", critical: true,
+    usage: "运行 ASR 转写（faster-whisper）、视频截图、调度脚本。整个管线引擎依赖 Python 环境。",
+    fixHint: "安装 Python 3.9+ → https://python.org 或使用 winget install Python.Python.3.12",
+  },
+  {
+    key: "ffmpeg", label: "FFmpeg", icon: "🎞️", critical: false,
+    usage: "视频/音频解码、提取音频流、关键帧截图。处理任何视频都需要 FFmpeg。",
+    fixHint: "winget install FFmpeg 或从 https://ffmpeg.org 下载，确保 ffmpeg 在 PATH 中",
+  },
+  {
+    key: "ytdlp", label: "yt-dlp", icon: "⬇️", critical: false,
+    usage: "下载 YouTube / B 站等在线视频、提取字幕。YouTube 视频的自动字幕优先策略依赖 yt-dlp。",
+    fixHint: "winget install yt-dlp.yt-dlp 或 pip install yt-dlp",
+  },
+  {
+    key: "gpu", label: "GPU/CUDA", icon: "🖥️", critical: false,
+    usage: "加速本地 ASR 转写（faster-whisper 在 GPU 上快 5-10 倍）。没有 GPU 也能用 CPU 转写，只是较慢。",
+    fixHint: "安装 NVIDIA CUDA Toolkit 或使用 CPU 模式（自动降级，不影响使用）",
+  },
+];
+
 function DepsStep({ deps, onRecheck }: { deps?: DepsInfo; onRecheck?: () => void }) {
   if (!deps) {
     return (
@@ -201,61 +231,76 @@ function DepsStep({ deps, onRecheck }: { deps?: DepsInfo; onRecheck?: () => void
     );
   }
 
-  const entries = [
-    { key: "python", label: "Python", icon: "🐍", dep: deps.python, critical: true },
-    { key: "ffmpeg", label: "FFmpeg", icon: "🎞️", dep: deps.ffmpeg, critical: false },
-    { key: "ytdlp",  label: "yt-dlp", icon: "⬇️", dep: deps.ytdlp, critical: false },
-    { key: "gpu",    label: "GPU/CUDA", icon: "🖥️", dep: deps.gpu, critical: false },
-  ];
+  const depMap: Record<string, typeof deps.python> = {
+    python: deps.python, ffmpeg: deps.ffmpeg, ytdlp: deps.ytdlp, gpu: deps.gpu,
+  };
 
-  const missingCritical = entries.some((e) => e.critical && !e.dep.found);
-  const missingOptional = entries.some((e) => !e.critical && !e.dep.found);
+  const missingCritical = DEP_DETAILS.some((d) => d.critical && !depMap[d.key]?.found);
+  const missingOptional = DEP_DETAILS.some((d) => !d.critical && !depMap[d.key]?.found);
 
   return (
     <div>
-      <p style={{ fontSize: 14, color: "var(--text-secondary, #a0a0c0)", marginBottom: 8, lineHeight: 1.6 }}>
-        大衍决会在本机完成下载、转写和截图。缺少工具时，文章处理仍可继续，视频处理可能需要补装依赖。
+      <p style={{ fontSize: 14, color: "var(--text-secondary, #a0a0c0)", marginBottom: 16, lineHeight: 1.6 }}>
+        大衍决会在本机完成下载、转写和截图。缺少工具时，<strong>文章处理仍可继续</strong>，视频处理可能需要补装依赖。
       </p>
 
       {/* Status summary */}
       <div style={{
-        marginBottom: 16, padding: "10px 14px", borderRadius: 8, fontSize: 12,
+        marginBottom: 16, padding: "12px 14px", borderRadius: 8, fontSize: 13,
         background: missingCritical ? "rgba(248,113,113,0.08)" : missingOptional ? "rgba(250,204,21,0.08)" : "rgba(74,222,128,0.08)",
         border: `1px solid ${missingCritical ? "rgba(248,113,113,0.25)" : missingOptional ? "rgba(250,204,21,0.25)" : "rgba(74,222,128,0.25)"}`,
         color: missingCritical ? "#f87171" : missingOptional ? "#facc15" : "#4ade80",
+        lineHeight: 1.6,
       }}>
         {missingCritical
-          ? "⚠️ 核心依赖缺失 — 视频/音频处理不可用，仅可处理文章内容"
+          ? "❌ 缺少 Python — 无法运行 ASR 转写和管线脚本。仅可处理纯文本/文章。"
           : missingOptional
-            ? "⚠️ 部分依赖缺失 — 部分视频功能受限"
+            ? "⚠️ 部分工具缺失 — 视频下载和转写功能受限，文章处理正常。"
             : "✅ 全部依赖就绪 — 可处理文章、视频和本地文件"}
       </div>
 
-      {/* Individual deps */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8, marginBottom: 16 }}>
-        {entries.map(({ key, label, icon, dep, critical }) => (
-          <div
-            key={key}
-            title={dep.suggestion}
-            style={{
-              display: "flex", alignItems: "center", gap: 10,
-              padding: "10px 12px", borderRadius: 8,
-              border: `1px solid ${dep.found ? "rgba(74,222,128,0.2)" : critical ? "rgba(248,113,113,0.2)" : "rgba(250,204,21,0.2)"}`,
-              background: dep.found ? "rgba(74,222,128,0.05)" : critical ? "rgba(248,113,113,0.05)" : "rgba(250,204,21,0.05)",
-              fontSize: 13,
-            }}
-          >
-            <span style={{ fontSize: 18 }}>{icon}</span>
-            <div style={{ flex: 1 }}>
-              <span style={{ fontWeight: 600, color: dep.found ? "#4ade80" : critical ? "#f87171" : "#facc15" }}>
-                {label} {dep.found ? "✅" : critical ? "❌" : "⚠️"}
-              </span>
-              {dep.version && (
-                <span style={{ fontSize: 11, color: "var(--text-muted, #666)", marginLeft: 6 }}>{dep.version}</span>
-              )}
+      {/* Individual deps — detailed cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+        {DEP_DETAILS.map(({ key, label, icon, usage, fixHint, critical }) => {
+          const dep = depMap[key];
+          const status = dep?.found ? "ok" : critical ? "error" : "warning";
+          return (
+            <div
+              key={key}
+              style={{
+                padding: "12px 14px", borderRadius: 10,
+                border: `1px solid ${status === "ok" ? "rgba(74,222,128,0.2)" : status === "error" ? "rgba(248,113,113,0.2)" : "rgba(250,204,21,0.2)"}`,
+                background: status === "ok" ? "rgba(74,222,128,0.04)" : status === "error" ? "rgba(248,113,113,0.04)" : "rgba(250,204,21,0.04)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <span style={{ fontSize: 22, lineHeight: 1 }}>{icon}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text, #e0e0f0)" }}>{label}</span>
+                    <span style={{
+                      fontSize: 11, fontWeight: 600,
+                      padding: "1px 8px", borderRadius: 4,
+                      background: status === "ok" ? "rgba(74,222,128,0.15)" : status === "error" ? "rgba(248,113,113,0.15)" : "rgba(250,204,21,0.15)",
+                      color: status === "ok" ? "#4ade80" : status === "error" ? "#f87171" : "#facc15",
+                    }}>
+                      {status === "ok" ? "已就绪" : status === "error" ? "缺失" : "可选"}
+                    </span>
+                    {dep?.version && (
+                      <span style={{ fontSize: 11, color: "var(--text-muted, #666)" }}>{dep.version}</span>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 12, color: "var(--text-secondary, #a0a0c0)", margin: "0 0 4px", lineHeight: 1.5 }}>{usage}</p>
+                  {!dep?.found && (
+                    <p style={{ fontSize: 11, color: status === "error" ? "#f87171" : "#facc15", margin: 0, lineHeight: 1.4 }}>
+                      💡 {fixHint}
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Actions */}

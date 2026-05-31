@@ -488,26 +488,36 @@ function ProcessingTab({
       {/* 本机依赖 */}
       {deps && (
         <SettingsSection title="本机依赖">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 6 }}>
-            {[
-              { label: "Python", dep: deps.python, critical: true },
-              { label: "FFmpeg", dep: deps.ffmpeg, critical: false },
-              { label: "yt-dlp", dep: deps.ytdlp, critical: false },
-              { label: "GPU/CUDA", dep: deps.gpu, critical: false },
-            ].map(({ label, dep, critical }) => (
-              <div key={label} style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "6px 10px", borderRadius: 6, fontSize: 11,
-                background: dep.found ? "rgba(74,222,128,0.08)" : critical ? "rgba(248,113,113,0.08)" : "rgba(250,204,21,0.08)",
-                border: `1px solid ${dep.found ? "rgba(74,222,128,0.2)" : critical ? "rgba(248,113,113,0.2)" : "rgba(250,204,21,0.2)"}`,
-                color: dep.found ? "#4ade80" : critical ? "#f87171" : "#facc15",
-              }}>
-                <span>{dep.found ? "✅" : critical ? "❌" : "⚠️"}</span>
-                <span style={{ fontWeight: 500 }}>{label}</span>
-                {dep.version && <span style={{ color: "var(--text-muted, #666)", fontSize: 10 }}>{dep.version}</span>}
+          {([
+            { label: "Python", icon: "🐍", dep: deps.python, critical: true,
+              usage: "ASR 转写、脚本调度 — 整个管线引擎依赖 Python 环境",
+              fix: "安装 Python 3.9+ → python.org 或 winget install Python.Python.3.12" },
+            { label: "FFmpeg", icon: "🎞️", dep: deps.ffmpeg, critical: false,
+              usage: "视频解码、音频提取、关键帧截图 — 处理视频必需",
+              fix: "winget install FFmpeg 或 ffmpeg.org 下载" },
+            { label: "yt-dlp", icon: "⬇️", dep: deps.ytdlp, critical: false,
+              usage: "下载在线视频、提取字幕 — YouTube/B 站等平台依赖",
+              fix: "winget install yt-dlp.yt-dlp 或 pip install yt-dlp" },
+            { label: "GPU/CUDA", icon: "🖥️", dep: deps.gpu, critical: false,
+              usage: "加速本地 ASR — 无 GPU 时自动降级为 CPU 模式",
+              fix: "可选安装 CUDA Toolkit，CPU 模式也可正常使用" },
+          ] as const).map(({ label, icon, dep, critical, usage, fix }) => (
+            <div key={label} style={{
+              padding: "10px 14px", borderRadius: 8, marginBottom: 8,
+              border: `1px solid ${dep.found ? "rgba(74,222,128,0.2)" : critical ? "rgba(248,113,113,0.2)" : "rgba(250,204,21,0.2)"}`,
+              background: dep.found ? "rgba(74,222,128,0.04)" : critical ? "rgba(248,113,113,0.04)" : "rgba(250,204,21,0.04)",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 16 }}>{icon}</span>
+                <span style={{ fontWeight: 600, fontSize: 13, color: dep.found ? "#4ade80" : critical ? "#f87171" : "#facc15" }}>
+                  {label} {dep.found ? "✅" : critical ? "❌" : "⚠️"}
+                </span>
+                {dep.version && <span style={{ fontSize: 11, color: "var(--text-muted, #666)" }}>{dep.version}</span>}
               </div>
-            ))}
-          </div>
+              <p style={{ fontSize: 11, color: "var(--text-secondary, #a0a0c0)", margin: 0, lineHeight: 1.5 }}>{usage}</p>
+              {!dep.found && <p style={{ fontSize: 11, color: critical ? "#f87171" : "#facc15", margin: "4px 0 0", lineHeight: 1.4 }}>💡 {fix}</p>}
+            </div>
+          ))}
         </SettingsSection>
       )}
 
