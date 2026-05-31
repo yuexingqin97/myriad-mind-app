@@ -83,7 +83,8 @@ Rust 后端通过 `commands/` 模块暴露 Tauri IPC 命令，每个 Python 脚�
 
 ## 现有文档
 
-- `README.md` — 项目总览（技术栈、架构、路线图、风险）
+- `README.md` — 项目介绍（做什么、特点、快速开始）
+- `docs/项目结构.md` — Monorepo 目录结构、各包职责、模块依赖关系、数据流
 - `docs/架构设计.md` — 详细架构设计（含 Rust 模块树、Python 调度代码示例、Zod Schema 完整定义）
 - `docs/法律风险分析.md` — 法律风险分析 + 免责模板
 - `docs/需求与排期.md` — 需求整理 & 任务拆解 & 时间评估
