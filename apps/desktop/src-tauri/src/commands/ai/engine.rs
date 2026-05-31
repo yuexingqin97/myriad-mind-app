@@ -52,20 +52,55 @@ pub async fn run_mind_task(
 pub async fn generate_note(
     app_handle: &AppHandle,
     content: &str,
-    content_type: &str, // "视频" / "文章" / "代码" 等
+    content_type: &str,
+    note_dir: Option<&str>,       // 输出目录，用于读取 memory.md
+    task_prompt: Option<&str>,    // 用户本次要求
 ) -> Result<String, AppError> {
     let api_key = read_deepseek_key()?;
-    let system_prompt = format!(
-        "你是一个专业的学习笔记生成器。请将以下{content_type}内容整理成结构化的学习笔记。
-用 Markdown 格式输出，包含以下章节：
-1. AI 摘要（2-3句话概括）
-2. 核心概念（要点列表）
-3. 详细笔记（按主题分段）
-4. 关键术语表
-5. 扩展学习建议
 
-输出语言：中文。专业术语保留英文原名。"
+    // 读取知识库记忆
+    let memory_context = if let Some(dir) = note_dir {
+        let memory_path = std::path::PathBuf::from(dir).join(".myriad-mind").join("memory.md");
+        if memory_path.exists() {
+            std::fs::read_to_string(&memory_path).unwrap_or_default()
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // 构建 system prompt
+    let mut system_prompt = String::from(
+        "你是一个专业的学习笔记生成器。请将以下内容整理成结构化的学习笔记。\n\
+        用 Markdown 格式输出，包含以下章节：\n\
+        1. AI 摘要（2-3句话概括）\n\
+        2. 核心概念（要点列表）\n\
+        3. 详细笔记（按主题分段）\n\
+        4. 关键术语表\n\
+        5. 扩展学习建议\n\
+        \n\
+        输出语言：中文。专业术语保留英文原名。\n"
     );
+
+    // 注入知识库记忆
+    if !memory_context.is_empty() {
+        system_prompt.push_str(&format!(
+            "\n## 当前知识库已有内容（供参考，避免重复）\n\n{memory_context}\n\n\
+            注意：如果本次内容与已有笔记相似或重复，优先更新已有笔记而非创建重复内容。\n"
+        ));
+    }
+
+    // 注入本次要求
+    if let Some(prompt) = task_prompt {
+        if !prompt.trim().is_empty() {
+            system_prompt.push_str(&format!(
+                "\n## 用户本次特别要求\n\n{prompt}\n\n请严格遵守以上要求。\n"
+            ));
+        }
+    }
+
+    system_prompt.push_str(&format!("\n内容类型：{content_type}"));
 
     let req = MindRequest {
         task: super::types::AiTask::NoteGeneration,
@@ -84,6 +119,7 @@ pub async fn generate_note(
     };
 
     let resp = stream_deepseek(app_handle, &req, &api_key).await?;
+    log::info!("[mind-engine] generated {} chars", resp.text.len());
     Ok(resp.text)
 }
 

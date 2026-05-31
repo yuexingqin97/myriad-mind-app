@@ -74,6 +74,7 @@ pub async fn execute_pipeline(
     python_path: Option<String>,
     note_dir: String,
     note_category: Option<String>,
+    task_prompt: Option<String>,
     debug_metadata: Option<bool>,
 ) -> Result<PipelineResult, AppError> {
     let start = std::time::Instant::now();
@@ -105,7 +106,7 @@ pub async fn execute_pipeline(
             run_audio_pipeline(&app, &input, &py, &note_dir).await
         }
         InputMode::ArticleUrl | InputMode::LocalText | InputMode::CodeProject => {
-            run_text_pipeline(&app, &input, &note_dir, note_category.as_deref(), debug_metadata.unwrap_or(false)).await
+            run_text_pipeline(&app, &input, &note_dir, note_category.as_deref(), task_prompt.as_deref(), debug_metadata.unwrap_or(false)).await
         }
     };
 
@@ -274,6 +275,7 @@ async fn run_text_pipeline(
     input: &str,
     note_dir: &str,
     note_category: Option<&str>,
+    task_prompt: Option<&str>,
     debug_metadata: bool,
 ) -> Result<(), AppError> {
     emit_progress(app, "read", "读取内容", 15.0, "running", None);
@@ -328,7 +330,7 @@ async fn run_text_pipeline(
         Some("正在调用 AI 模型，流式输出中…"));
 
     // 调用 MindEngine (DeepSeek V4 Pro)
-    match ai::generate_note(app, &text, "文本").await {
+    match ai::generate_note(app, &text, "文本", Some(note_dir), task_prompt).await {
         Ok(note) => {
             emit_progress(app, "save", "💾 保存笔记", 90.0, "running", None);
 

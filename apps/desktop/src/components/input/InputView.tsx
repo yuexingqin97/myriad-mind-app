@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { type MyriadMindConfig, classifyInput, estimateCost, type TokenEstimate } from "@myriad-mind/core";
 import { Button, Input } from "@myriad-mind/ui";
 import { usePipeline } from "@/hooks/usePipeline";
@@ -84,6 +84,8 @@ export function InputView({ config }: InputViewProps) {
     setInputUrl,
     noteCategory,
     setNoteCategory,
+    taskPrompt,
+    setTaskPrompt,
     status,
     progress,
     progressDetail,
@@ -142,6 +144,9 @@ export function InputView({ config }: InputViewProps) {
               炼化
             </Button>
           </div>
+
+          {/* ---- 本次要求（可折叠）---- */}
+          <TaskPromptInput value={taskPrompt} onChange={setTaskPrompt} disabled={processing} />
 
           {/* ---- 支持的输入内容（仅空输入时显示）---- */}
           {showHints && (
@@ -222,6 +227,69 @@ export function InputView({ config }: InputViewProps) {
       </div>
 
       <LogPanel entries={logs} streamingText={streamingText} />
+    </div>
+  );
+}
+
+// ---- 本次要求组件 ----
+
+const QUICK_TEMPLATES = [
+  { label: "省流速览", text: "只输出重点摘要和结论，跳过细枝末节。" },
+  { label: "教程步骤", text: "这是操作教程，请按步骤保留关键操作和注意事项。" },
+  { label: "源码分析", text: "重点分析架构、模块职责、关键调用链和可复用设计。" },
+  { label: "考试复习", text: "输出适合复习的提纲、术语表和自测题。" },
+  { label: "只要结论", text: "优先给结论，再列必要依据。" },
+];
+
+function TaskPromptInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={disabled}
+        style={{
+          background: "none", border: "none", cursor: "pointer", padding: 0,
+          fontSize: 12, color: "var(--text-muted, #666)", display: "flex", alignItems: "center", gap: 4,
+        }}
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        <span>本次要求（可选）</span>
+        {value && <span style={{ color: "var(--brand-primary, #1683ff)", fontSize: 11 }}>已填写</span>}
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={disabled}
+            placeholder="你希望这次怎么炼化？例如：只要速览，跳过评论区；重点保留操作画面。"
+            rows={3}
+            style={{
+              width: "100%", padding: "8px 10px", fontSize: 12, borderRadius: 8, resize: "vertical",
+              border: "1px solid var(--border-default, #383a43)", background: "var(--bg-input, #1f2026)",
+              color: "var(--text, #e0e0f0)", outline: "none", fontFamily: "inherit",
+            }}
+          />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {QUICK_TEMPLATES.map((t) => (
+              <button
+                key={t.label}
+                disabled={disabled}
+                onClick={() => onChange(value ? `${value} ${t.text}` : t.text)}
+                style={{
+                  padding: "2px 8px", fontSize: 11, borderRadius: 4, cursor: "pointer",
+                  border: "1px solid var(--border-default, #383a43)", background: "var(--bg-surface, #1a1a2e)",
+                  color: "var(--text-secondary, #aaa)",
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

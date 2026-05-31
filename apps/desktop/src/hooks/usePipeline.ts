@@ -19,6 +19,8 @@ interface UsePipelineResult {
   setInputUrl: (v: string) => void;
   noteCategory: string;
   setNoteCategory: (v: string) => void;
+  taskPrompt: string;
+  setTaskPrompt: (v: string) => void;
   status: string | null;
   progress: number;
   progressDetail: string | null;
@@ -115,6 +117,7 @@ async function runMockPipeline(
 export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
   const [inputUrl, setInputUrl] = useState("");
   const [noteCategory, setNoteCategory] = useState("");
+  const [taskPrompt, setTaskPrompt] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressDetail, setProgressDetail] = useState<string | null>(null);
@@ -273,6 +276,7 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
           pythonPath: config.python_path || null,
           noteDir: config.output.note_dir || "",
           noteCategory: noteCategory || null,
+          taskPrompt: taskPrompt || null,
           debugMetadata: config.output.debug_metadata ?? false,
         }) as { success: boolean; mode: string; duration_seconds: number };
         if (result.success) {
@@ -305,6 +309,8 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
     setInputUrl,
     noteCategory,
     setNoteCategory,
+    taskPrompt,
+    setTaskPrompt,
     status,
     progress,
     progressDetail,
