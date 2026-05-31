@@ -112,6 +112,23 @@ async function runMockPipeline(
   setProgressDetail(`识别为 ${classify.platform}，模拟耗时 ${(mockSteps.length * 0.5).toFixed(1)}s`);
 }
 
+function missingRuntimeDeps(
+  mode: string,
+  deps: Record<string, api.DepResult>,
+): string[] {
+  const missing: string[] = [];
+  const needsMedia = ["bilibili", "youtube", "douyin", "xiaohongshu", "local_video", "local_audio"].includes(mode);
+  const needsOnline = ["bilibili", "youtube", "douyin", "xiaohongshu"].includes(mode);
+  const needsVideo = ["bilibili", "youtube", "douyin", "xiaohongshu", "local_video"].includes(mode);
+
+  if (needsMedia && !deps.python?.found) missing.push("Python 3.9+");
+  if (needsMedia && !deps["faster-whisper"]?.found) missing.push("faster-whisper");
+  if (needsOnline && !deps["yt-dlp"]?.found) missing.push("yt-dlp");
+  if (needsVideo && !deps.ffmpeg?.found) missing.push("FFmpeg");
+
+  return missing;
+}
+
 // ---- Hook ----
 
 export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
@@ -150,6 +167,21 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
     if (!inputUrl.trim() || processing) return;
     const classify = classifyInput(inputUrl.trim());
     const estimate = estimateCost(classify, config);
+
+    if (await isTauri()) {
+      const deps = await api.detectAllDeps(config.python_path || undefined);
+      const missing = missingRuntimeDeps(classify.mode, deps);
+      if (missing.length > 0) {
+        const message = `运行环境未就绪，缺少：${missing.join("、")}。请到设置页修复依赖后重新检测。`;
+        setStatus(`❌ ${message}`);
+        setProgressDetail(message);
+        setProcessing(false);
+        logIdRef.current = 0;
+        setLogs([]);
+        pushLog("error", message);
+        return;
+      }
+    }
 
     setStatus(
       `${classify.platform} · 预估 ${estimate.estimatedMinutes} 分钟 · ${Math.round((estimate.inputTokens + estimate.outputTokens) / 1000)}k tokens`
@@ -278,6 +310,7 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
           noteCategory: noteCategory || null,
           taskPrompt: taskPrompt || null,
           debugMetadata: config.output.debug_metadata ?? false,
+          cleanupTemp: config.output.cleanup_temp ?? true,
         }) as { success: boolean; mode: string; duration_seconds: number };
         if (result.success) {
           setProgress(100);

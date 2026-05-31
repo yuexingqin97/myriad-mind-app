@@ -65,6 +65,14 @@ export interface VideoConfig {
   provider: "ai-douyin" | "tikhub";
 }
 
+export interface ScreenshotReviewConfig {
+  enabled: boolean;
+  mode: "batch" | "single" | "hybrid";
+  max_review_frames: number;
+  min_score: number;
+  max_selected: number;
+}
+
 export interface FeaturesConfig {
   keyframes: boolean;
   mermaid: boolean;
@@ -72,6 +80,8 @@ export interface FeaturesConfig {
   comments: boolean;
   reading_info: boolean;
   estimation: boolean;
+  screenshot_review?: ScreenshotReviewConfig;
+  tutorial_detection: boolean;
 }
 
 export interface KeyframesConfig {

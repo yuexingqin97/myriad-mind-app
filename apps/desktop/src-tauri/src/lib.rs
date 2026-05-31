@@ -8,10 +8,13 @@ mod error;
 use commands::{
     ai::{run_mind_task, test_deepseek_connection},
     config::{
-        check_keychain_entry, get_config_info, is_first_launch, read_config,
-        read_keychain_entry, reset_config, store_keychain_entry, write_config,
+        check_keychain_entry, get_config_info, is_first_launch, read_config, read_keychain_entry,
+        reset_config, store_keychain_entry, write_config,
     },
-    deps::{detect_all_deps, detect_ffmpeg, detect_gpu, detect_python, detect_python_auto, detect_ytdlp},
+    deps::{
+        detect_all_deps, detect_faster_whisper, detect_ffmpeg, detect_gpu, detect_python,
+        detect_python_auto, detect_ytdlp,
+    },
     fs::{cleanup_temp, copy_asset, pick_folder, read_text_file, scan_directory, write_note},
     pipeline::{execute_pipeline, execute_qa},
     python::{
@@ -45,6 +48,7 @@ pub fn run() {
             detect_python,
             detect_python_auto,
             detect_ffmpeg,
+            detect_faster_whisper,
             detect_ytdlp,
             detect_gpu,
             detect_all_deps,

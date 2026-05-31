@@ -81,7 +81,10 @@ pub async fn stream_deepseek(
 
     let url = format!("{BASE_URL}{CHAT_ENDPOINT}");
 
-    log::info!("[mind-engine] request: model={model}, task={}", request.task);
+    log::info!(
+        "[mind-engine] request: model={model}, task={}",
+        request.task
+    );
 
     let response = client
         .post(&url)
@@ -196,9 +199,7 @@ pub async fn stream_deepseek(
                             MindStreamEvent::Usage {
                                 input_tokens: usage.as_ref().map(|u| u.input_tokens),
                                 output_tokens: usage.as_ref().map(|u| u.output_tokens),
-                                reasoning_tokens: usage
-                                    .as_ref()
-                                    .and_then(|u| u.reasoning_tokens),
+                                reasoning_tokens: usage.as_ref().and_then(|u| u.reasoning_tokens),
                                 total_tokens: usage.as_ref().map(|u| u.total_tokens),
                             },
                         );
@@ -235,4 +236,128 @@ pub async fn stream_deepseek(
         usage,
         finish_reason,
     })
+}
+
+// ============================================================
+// Vision API — 非流式图片理解调用
+// ============================================================
+
+use super::types::VisionRequest;
+
+/// 调用 DeepSeek V4 Vision（非流式），返回文本响应
+pub async fn vision_complete(request: &VisionRequest, api_key: &str) -> Result<String, AppError> {
+    let client = Client::new();
+    let model = request
+        .model_override
+        .as_deref()
+        .unwrap_or("deepseek-v4-flash");
+
+    // 构建 messages（OpenAI 兼容多模态格式）
+    let mut messages: Vec<Value> = vec![serde_json::json!({
+        "role": "system",
+        "content": request.system_prompt,
+    })];
+
+    for msg in &request.messages {
+        let content_blocks: Vec<Value> = msg
+            .content
+            .iter()
+            .map(|block| match block {
+                super::types::VisionContentBlock::Text { text } => {
+                    serde_json::json!({"type": "text", "text": text})
+                }
+                super::types::VisionContentBlock::ImageUrl { image_url } => {
+                    serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_url.url,
+                            "detail": image_url.detail.as_deref().unwrap_or("auto"),
+                        }
+                    })
+                }
+            })
+            .collect();
+
+        messages.push(serde_json::json!({
+            "role": msg.role,
+            "content": content_blocks,
+        }));
+    }
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+        "max_tokens": request.max_tokens,
+    });
+
+    let url = format!("{BASE_URL}{CHAT_ENDPOINT}");
+
+    log::info!(
+        "[vision] request: model={model}, task={}, images={}",
+        request.task,
+        request
+            .messages
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter(|b| matches!(b, super::types::VisionContentBlock::ImageUrl { .. }))
+            .count()
+    );
+
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            let kind = if e.is_timeout() { "timeout" } else { "network" };
+            AppError::Ai {
+                kind: kind.to_string(),
+                message: e.to_string(),
+            }
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body_text = response.text().await.unwrap_or_default();
+        let kind = AiErrorKind::classify(Some(status.as_u16()), &body_text);
+        return Err(AppError::Ai {
+            kind: kind.to_string(),
+            message: body_text,
+        });
+    }
+
+    let json: Value = response.json().await.map_err(|e| AppError::Ai {
+        kind: "invalid_response".into(),
+        message: format!("响应 JSON 解析失败: {e}"),
+    })?;
+
+    let text = json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    let usage_total = json["usage"]["total_tokens"].as_u64().unwrap_or(0);
+    log::info!(
+        "[vision] done: model={model}, text={}chars, tokens={usage_total}",
+        text.len()
+    );
+
+    Ok(text)
+}
+
+/// 将本地图片文件编码为 base64 data URL
+pub fn encode_image_to_data_url(path: &std::path::Path) -> Result<String, AppError> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let bytes = std::fs::read(path).map_err(|e| AppError::Io(e))?;
+    let mime = match path.extension().and_then(|e| e.to_str()) {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    };
+    let b64 = STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{b64}"))
 }

@@ -52,10 +52,7 @@ fn scan_recursive(
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        let name = entry
-            .file_name()
-            .to_string_lossy()
-            .to_string();
+        let name = entry.file_name().to_string_lossy().to_string();
 
         if path.is_dir() {
             // 跳过隐藏目录和常见忽略目录
@@ -105,18 +102,14 @@ fn classify_file_type(ext: &str) -> &str {
 /// 读取文本文件内容
 #[tauri::command]
 pub async fn read_text_file(file_path: String) -> Result<String, AppError> {
-    let content = std::fs::read_to_string(&file_path).map_err(|e| {
-        AppError::Other(format!("无法读取文件 {file_path}: {e}"))
-    })?;
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| AppError::Other(format!("无法读取文件 {file_path}: {e}")))?;
     Ok(content)
 }
 
 /// 写入 Markdown 笔记到指定路径
 #[tauri::command]
-pub async fn write_note(
-    file_path: String,
-    content: String,
-) -> Result<(), AppError> {
+pub async fn write_note(file_path: String, content: String) -> Result<(), AppError> {
     // 确保父目录存在
     if let Some(parent) = PathBuf::from(&file_path).parent() {
         std::fs::create_dir_all(parent).map_err(AppError::Io)?;
@@ -138,10 +131,7 @@ pub async fn cleanup_temp(temp_dir: String) -> Result<(), AppError> {
 
 /// 复制截图到笔记 assets 目录
 #[tauri::command]
-pub async fn copy_asset(
-    source: String,
-    dest_dir: String,
-) -> Result<String, AppError> {
+pub async fn copy_asset(source: String, dest_dir: String) -> Result<String, AppError> {
     let src_path = PathBuf::from(&source);
     let dest_dir_path = PathBuf::from(&dest_dir);
 

@@ -142,12 +142,23 @@ pub fn plan_placement(
             if let Some(entry) = fp_map.items.get(&fp_key) {
                 let exists = PathBuf::from(base_dir).join(&entry.path).exists();
                 return PlacementPlan {
-                    action: if exists { "update_note".into() } else { "create_note".into() },
+                    action: if exists {
+                        "update_note".into()
+                    } else {
+                        "create_note".into()
+                    },
                     confidence: 0.98,
                     reason: format!("source_fingerprint 命中 {}", entry.path),
                     category: PlacementCategory {
-                        name: PathBuf::from(&entry.path).parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
-                        path: PathBuf::from(&entry.path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+                        name: PathBuf::from(&entry.path)
+                            .parent()
+                            .and_then(|p| p.file_name())
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        path: PathBuf::from(&entry.path)
+                            .parent()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default(),
                         is_existing: true,
                     },
                     target: PlacementTarget {
@@ -175,9 +186,23 @@ pub fn plan_placement(
             action: "create_note".into(),
             confidence: 0.95,
             reason: "用户指定子目录".into(),
-            category: PlacementCategory { name: cat_parts[0].into(), path: cat.into(), is_existing: lib_dir.join("..").join(cat).exists() },
-            target: PlacementTarget { path: format!("{cat}/{suggested_title}.md"), exists: false, note_id: None, current_version: None },
-            source: PlacementSource { raw: source_raw.into(), canonical: format!("{source_type}:{fingerprint}"), fingerprint: fingerprint.into(), source_type: source_type.into() },
+            category: PlacementCategory {
+                name: cat_parts[0].into(),
+                path: cat.into(),
+                is_existing: lib_dir.join("..").join(cat).exists(),
+            },
+            target: PlacementTarget {
+                path: format!("{cat}/{suggested_title}.md"),
+                exists: false,
+                note_id: None,
+                current_version: None,
+            },
+            source: PlacementSource {
+                raw: source_raw.into(),
+                canonical: format!("{source_type}:{fingerprint}"),
+                fingerprint: fingerprint.into(),
+                source_type: source_type.into(),
+            },
             candidates: vec![],
         };
     }
@@ -187,9 +212,23 @@ pub fn plan_placement(
         action: "create_note".into(),
         confidence: 0.8,
         reason: format!("根据内容识别为 {suggested_category}"),
-        category: PlacementCategory { name: suggested_category.into(), path: suggested_category.into(), is_existing: PathBuf::from(base_dir).join(suggested_category).exists() },
-        target: PlacementTarget { path: format!("{suggested_category}/{suggested_title}.md"), exists: false, note_id: None, current_version: None },
-        source: PlacementSource { raw: source_raw.into(), canonical: format!("{source_type}:{fingerprint}"), fingerprint: fingerprint.into(), source_type: source_type.into() },
+        category: PlacementCategory {
+            name: suggested_category.into(),
+            path: suggested_category.into(),
+            is_existing: PathBuf::from(base_dir).join(suggested_category).exists(),
+        },
+        target: PlacementTarget {
+            path: format!("{suggested_category}/{suggested_title}.md"),
+            exists: false,
+            note_id: None,
+            current_version: None,
+        },
+        source: PlacementSource {
+            raw: source_raw.into(),
+            canonical: format!("{source_type}:{fingerprint}"),
+            fingerprint: fingerprint.into(),
+            source_type: source_type.into(),
+        },
         candidates: vec![],
     }
 }
@@ -215,10 +254,15 @@ pub fn update_library_after_save(
     let notes_path = lib_dir.join("notes.jsonl");
     let mut notes: Vec<NoteIndexEntry> = if notes_path.exists() {
         serde_json::from_str::<serde_json::Value>(
-            &std::fs::read_to_string(&notes_path).unwrap_or_default()
-        ).ok()
+            &std::fs::read_to_string(&notes_path).unwrap_or_default(),
+        )
+        .ok()
         .and_then(|v| v.as_array().cloned())
-        .map(|arr| arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                .collect()
+        })
         .unwrap_or_default()
     } else {
         vec![]
@@ -240,10 +284,21 @@ pub fn update_library_after_save(
         sources: vec![format!("sha256:{fingerprint}")],
         ai_model: "deepseek-v4-pro".into(),
     });
-    let _ = std::fs::write(&notes_path, serde_json::to_string_pretty(&notes).unwrap_or_default());
+    let _ = std::fs::write(
+        &notes_path,
+        serde_json::to_string_pretty(&notes).unwrap_or_default(),
+    );
 
     // Update fingerprints
-    update_fingerprints(&lib_dir, note_id, note_path, source_raw, source_type, fingerprint, &now);
+    update_fingerprints(
+        &lib_dir,
+        note_id,
+        note_path,
+        source_raw,
+        source_type,
+        fingerprint,
+        &now,
+    );
 
     // Update categories
     update_categories(&lib_dir, base_dir);
@@ -281,11 +336,19 @@ fn rebuild_library(base_dir: &str) -> Result<(), String> {
 
     // Write files
     let notes_path = lib_dir.join("notes.jsonl");
-    std::fs::write(&notes_path, serde_json::to_string_pretty(&notes).unwrap_or_default()).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &notes_path,
+        serde_json::to_string_pretty(&notes).unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())?;
 
     let fp_path = lib_dir.join("fingerprints.json");
     let fp_map = FingerprintMap { items: fp_items };
-    std::fs::write(&fp_path, serde_json::to_string_pretty(&fp_map).unwrap_or_default()).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &fp_path,
+        serde_json::to_string_pretty(&fp_map).unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())?;
 
     update_categories(&lib_dir, base_dir);
     update_library_json(&lib_dir, base_dir, notes.len(), &now);
@@ -307,11 +370,17 @@ fn scan_markdown_files(
             let path = entry.path();
             if path.is_dir() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with('.') { continue; }
+                if name.starts_with('.') {
+                    continue;
+                }
                 scan_markdown_files(base_dir, &path.to_string_lossy(), notes, fp_items);
             } else if path.extension().map(|e| e == "md").unwrap_or(false) {
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    let rel = path.strip_prefix(base_dir).unwrap_or(&path).to_string_lossy().to_string();
+                    let rel = path
+                        .strip_prefix(base_dir)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .to_string();
                     let entry = parse_note_metadata(&rel, &content);
                     let eid = entry.id.clone();
                     let erel = rel.clone();
@@ -321,7 +390,13 @@ fn scan_markdown_files(
                     if let Some(block) = extract_metadata_block(&content) {
                         for line in block.lines() {
                             if line.trim().starts_with("fingerprint:") {
-                                let fp = line.split(':').nth(1).unwrap_or("").trim().trim_matches('"').to_string();
+                                let fp = line
+                                    .split(':')
+                                    .nth(1)
+                                    .unwrap_or("")
+                                    .trim()
+                                    .trim_matches('"')
+                                    .to_string();
                                 if !fp.is_empty() {
                                     let fp_key = format!("sha256:{fp}");
                                     fp_items.entry(fp_key).or_insert(FingerprintEntry {
@@ -343,13 +418,25 @@ fn scan_markdown_files(
 }
 
 fn parse_note_metadata(rel_path: &str, content: &str) -> NoteIndexEntry {
-    let title = content.lines().find(|l| l.trim().starts_with("# ")).map(|l| l.trim()[2..].trim().to_string()).unwrap_or_else(|| rel_path.to_string());
-    let category = PathBuf::from(rel_path).parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "未分类".into());
+    let title = content
+        .lines()
+        .find(|l| l.trim().starts_with("# "))
+        .map(|l| l.trim()[2..].trim().to_string())
+        .unwrap_or_else(|| rel_path.to_string());
+    let category = PathBuf::from(rel_path)
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "未分类".into());
     let mut version = 1u32;
     if let Some(block) = extract_metadata_block(content) {
         for line in block.lines() {
             if line.trim().starts_with("current_version:") {
-                version = line.split(':').nth(1).and_then(|v| v.trim().parse().ok()).unwrap_or(1);
+                version = line
+                    .split(':')
+                    .nth(1)
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(1);
             }
         }
     }
@@ -386,23 +473,47 @@ fn extract_metadata_block(content: &str) -> Option<String> {
     None
 }
 
-fn update_fingerprints(lib_dir: &PathBuf, note_id: &str, path: &str, source_raw: &str, source_type: &str, fingerprint: &str, now: &str) {
+fn update_fingerprints(
+    lib_dir: &PathBuf,
+    note_id: &str,
+    path: &str,
+    source_raw: &str,
+    source_type: &str,
+    fingerprint: &str,
+    now: &str,
+) {
     let fp_path = lib_dir.join("fingerprints.json");
     let mut map: FingerprintMap = if fp_path.exists() {
-        serde_json::from_str(&std::fs::read_to_string(&fp_path).unwrap_or_default()).unwrap_or(FingerprintMap { items: HashMap::new() })
+        serde_json::from_str(&std::fs::read_to_string(&fp_path).unwrap_or_default()).unwrap_or(
+            FingerprintMap {
+                items: HashMap::new(),
+            },
+        )
     } else {
-        FingerprintMap { items: HashMap::new() }
+        FingerprintMap {
+            items: HashMap::new(),
+        }
     };
     let fp_key = format!("sha256:{fingerprint}");
     if let Some(entry) = map.items.get_mut(&fp_key) {
         entry.last_used_at = now.into();
     } else {
-        map.items.insert(fp_key.clone(), FingerprintEntry {
-            note_id: note_id.into(), path: path.into(), source_raw: source_raw.into(),
-            source_type: source_type.into(), first_seen_at: now.into(), last_used_at: now.into(),
-        });
+        map.items.insert(
+            fp_key.clone(),
+            FingerprintEntry {
+                note_id: note_id.into(),
+                path: path.into(),
+                source_raw: source_raw.into(),
+                source_type: source_type.into(),
+                first_seen_at: now.into(),
+                last_used_at: now.into(),
+            },
+        );
     }
-    let _ = std::fs::write(&fp_path, serde_json::to_string_pretty(&map).unwrap_or_default());
+    let _ = std::fs::write(
+        &fp_path,
+        serde_json::to_string_pretty(&map).unwrap_or_default(),
+    );
 }
 
 fn update_categories(lib_dir: &PathBuf, base_dir: &str) {
@@ -411,27 +522,44 @@ fn update_categories(lib_dir: &PathBuf, base_dir: &str) {
         for entry in entries.flatten() {
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with('.') { continue; }
+                if name.starts_with('.') {
+                    continue;
+                }
                 let count = count_md_files(&entry.path());
                 cat_map.insert(name, count);
             }
         }
     }
-    let cats: Vec<CategoryEntry> = cat_map.into_iter().map(|(name, count)| CategoryEntry {
-        name: name.clone(), path: name, aliases: vec![], note_count: count, tags: vec![],
-    }).collect();
-    let _ = std::fs::write(lib_dir.join("categories.json"), serde_json::to_string_pretty(&serde_json::json!({
-        "schema": "myriad-mind-categories/v1",
-        "categories": cats,
-    })).unwrap_or_default());
+    let cats: Vec<CategoryEntry> = cat_map
+        .into_iter()
+        .map(|(name, count)| CategoryEntry {
+            name: name.clone(),
+            path: name,
+            aliases: vec![],
+            note_count: count,
+            tags: vec![],
+        })
+        .collect();
+    let _ = std::fs::write(
+        lib_dir.join("categories.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schema": "myriad-mind-categories/v1",
+            "categories": cats,
+        }))
+        .unwrap_or_default(),
+    );
 }
 
 fn count_md_files(dir: &std::path::Path) -> usize {
     let mut count = 0;
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
-            if entry.path().extension().map(|e| e == "md").unwrap_or(false) { count += 1; }
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            if entry.path().extension().map(|e| e == "md").unwrap_or(false) {
+                count += 1;
+            }
         }
     }
     count
@@ -450,7 +578,10 @@ fn update_library_json(lib_dir: &PathBuf, base_dir: &str, note_count: usize, now
             last_scan_at: now.into(),
         },
     };
-    let _ = std::fs::write(lib_dir.join("library.json"), serde_json::to_string_pretty(&lib).unwrap_or_default());
+    let _ = std::fs::write(
+        lib_dir.join("library.json"),
+        serde_json::to_string_pretty(&lib).unwrap_or_default(),
+    );
 }
 
 fn count_categories(base_dir: &str) -> usize {
@@ -467,9 +598,13 @@ fn count_categories(base_dir: &str) -> usize {
 }
 
 fn build_memory_md(lib_dir: &PathBuf, notes: &[NoteIndexEntry]) {
-    let mut content = String::from("# 大衍决知识库记忆\n\n> 自动生成的简略索引。用于帮助 AI 判断分类和避免重复生成。\n\n## 分类概览\n\n");
+    let mut content = String::from(
+        "# 大衍决知识库记忆\n\n> 自动生成的简略索引。用于帮助 AI 判断分类和避免重复生成。\n\n## 分类概览\n\n",
+    );
     let mut cat_counts: HashMap<&str, usize> = HashMap::new();
-    for n in notes { *cat_counts.entry(&n.category).or_default() += 1; }
+    for n in notes {
+        *cat_counts.entry(&n.category).or_default() += 1;
+    }
     for (cat, count) in &cat_counts {
         content.push_str(&format!("- {}：{} 篇\n", cat, count));
     }
@@ -480,7 +615,13 @@ fn build_memory_md(lib_dir: &PathBuf, notes: &[NoteIndexEntry]) {
     let _ = std::fs::write(lib_dir.join("memory.md"), &content);
 }
 
-fn update_memory_md(lib_dir: &PathBuf, title: &str, category: &str, _path: &str, _notes: &[NoteIndexEntry]) {
+fn update_memory_md(
+    lib_dir: &PathBuf,
+    title: &str,
+    category: &str,
+    _path: &str,
+    _notes: &[NoteIndexEntry],
+) {
     let memory_path = lib_dir.join("memory.md");
     if !memory_path.exists() {
         let _ = build_memory_md(lib_dir, &[]);
@@ -503,20 +644,33 @@ fn update_scan_state(lib_dir: &PathBuf, base_dir: &str) {
         "last_scan_at": crate::commands::notes::timestamp_now(),
         "files": files,
     });
-    let _ = std::fs::write(lib_dir.join("scan-state.json"), serde_json::to_string_pretty(&state).unwrap_or_default());
+    let _ = std::fs::write(
+        lib_dir.join("scan-state.json"),
+        serde_json::to_string_pretty(&state).unwrap_or_default(),
+    );
 }
 
-fn collect_file_states(dir: PathBuf, base_dir: &str, files: &mut HashMap<String, serde_json::Value>) {
+fn collect_file_states(
+    dir: PathBuf,
+    base_dir: &str,
+    files: &mut HashMap<String, serde_json::Value>,
+) {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with('.') { continue; }
+                if name.starts_with('.') {
+                    continue;
+                }
                 collect_file_states(path, base_dir, files);
             } else if path.extension().map(|e| e == "md").unwrap_or(false) {
                 let meta = std::fs::metadata(&path).ok();
-                let rel = path.strip_prefix(base_dir).unwrap_or(&path).to_string_lossy().to_string();
+                let rel = path
+                    .strip_prefix(base_dir)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string();
                 files.insert(rel, serde_json::json!({
                     "mtime": meta.as_ref().and_then(|m| m.modified().ok()).map(|t| format!("{:?}", t)).unwrap_or_default(),
                     "size": meta.map(|m| m.len()).unwrap_or(0),

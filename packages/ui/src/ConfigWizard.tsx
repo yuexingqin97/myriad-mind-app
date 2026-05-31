@@ -45,6 +45,19 @@ const STEPS: Array<{ id: StepId; title: string; icon: string }> = [
   { id: "review",     title: "完成检查",   icon: "✅" },
 ];
 
+function getBlockingDeps(deps: DepsInfo | undefined, intent: SetupIntent): string[] {
+  if (!deps) return ["依赖检测未完成"];
+
+  if (intent === "article" || intent === "code") return [];
+
+  const missing: string[] = [];
+  if (!deps.python?.found) missing.push("Python 3.9+");
+  if (!deps.fasterWhisper?.found) missing.push("faster-whisper");
+  if (intent === "video" && !deps.ytdlp?.found) missing.push("yt-dlp");
+  if (!deps.ffmpeg?.found) missing.push("FFmpeg");
+  return missing;
+}
+
 // ============================================================
 
 export function ConfigWizard({
@@ -72,9 +85,11 @@ export function ConfigWizard({
 
   // Step-specific "next" availability
   const canProceed = (() => {
+    if (step === 1) return getBlockingDeps(deps, setupIntent).length === 0;
     if (step === 4) return !!config.output.note_dir?.trim(); // output dir required
     return true;
   })();
+  const blockingDeps = getBlockingDeps(deps, setupIntent);
 
   return (
     <Card
@@ -101,7 +116,13 @@ export function ConfigWizard({
                 <Button onClick={() => onSave(config, "go_input")}>🚀 完成并开始炼化</Button>
               </>
             ) : (
-              <Button onClick={() => setStep((s) => s + 1)} disabled={!canProceed}>下一步 →</Button>
+              <Button
+                onClick={() => setStep((s) => s + 1)}
+                disabled={!canProceed}
+                title={step === 1 && blockingDeps.length ? `缺少：${blockingDeps.join("、")}` : undefined}
+              >
+                下一步 →
+              </Button>
             )}
           </div>
         </div>
@@ -127,7 +148,7 @@ export function ConfigWizard({
       {/* 步骤内容 */}
       <div style={{ minHeight: 300 }}>
         {step === 0 && <WelcomeStep intent={setupIntent} onChange={setSetupIntent} />}
-        {step === 1 && <DepsStep deps={deps} onRecheck={onRecheckDeps} />}
+        {step === 1 && <DepsStep deps={deps} intent={setupIntent} onRecheck={onRecheckDeps} />}
         {step === 2 && <ApiKeysStep keychain={keychain} />}
         {step === 3 && <ProcessingStep config={config} update={update} intent={setupIntent} />}
         {step === 4 && <OutputStep config={config} update={update} onSelectDir={onSelectOutputDir} />}
@@ -208,6 +229,11 @@ const DEP_DETAILS: Array<{
     fixHint: "winget install FFmpeg 或从 https://ffmpeg.org 下载，确保 ffmpeg 在 PATH 中",
   },
   {
+    key: "fasterWhisper", label: "faster-whisper", icon: "🎙️", critical: false,
+    usage: "本地 ASR 转写。没有可用字幕时，音视频会回退到 faster-whisper 生成字幕。",
+    fixHint: "使用应用检测到的 Python 执行：python -m pip install -U faster-whisper",
+  },
+  {
     key: "ytdlp", label: "yt-dlp", icon: "⬇️", critical: false,
     usage: "下载 YouTube / B 站等在线视频、提取字幕。YouTube 视频的自动字幕优先策略依赖 yt-dlp。",
     fixHint: "winget install yt-dlp.yt-dlp 或 pip install yt-dlp",
@@ -219,7 +245,7 @@ const DEP_DETAILS: Array<{
   },
 ];
 
-function DepsStep({ deps, onRecheck }: { deps?: DepsInfo; onRecheck?: () => void }) {
+function DepsStep({ deps, intent, onRecheck }: { deps?: DepsInfo; intent: SetupIntent; onRecheck?: () => void }) {
   if (!deps) {
     return (
       <div style={{ textAlign: "center", padding: 40 }}>
@@ -232,16 +258,21 @@ function DepsStep({ deps, onRecheck }: { deps?: DepsInfo; onRecheck?: () => void
   }
 
   const depMap: Record<string, typeof deps.python> = {
-    python: deps.python, ffmpeg: deps.ffmpeg, ytdlp: deps.ytdlp, gpu: deps.gpu,
+    python: deps.python,
+    ffmpeg: deps.ffmpeg,
+    fasterWhisper: deps.fasterWhisper,
+    ytdlp: deps.ytdlp,
+    gpu: deps.gpu,
   };
 
-  const missingCritical = DEP_DETAILS.some((d) => d.critical && !depMap[d.key]?.found);
-  const missingOptional = DEP_DETAILS.some((d) => !d.critical && !depMap[d.key]?.found);
+  const blockingDeps = getBlockingDeps(deps, intent);
+  const missingCritical = blockingDeps.length > 0;
+  const missingOptional = DEP_DETAILS.some((d) => !depMap[d.key]?.found);
 
   return (
     <div>
       <p style={{ fontSize: 14, color: "var(--text-secondary, #a0a0c0)", marginBottom: 16, lineHeight: 1.6 }}>
-        大衍决会在本机完成下载、转写和截图。缺少工具时，<strong>文章处理仍可继续</strong>，视频处理可能需要补装依赖。
+        大衍决会在本机完成下载、转写和截图。你当前选择的是 <strong>{intent === "video" ? "在线视频" : intent === "local_media" ? "本地媒体" : "文章/代码"}</strong> 路径；所需依赖不齐时不会进入下一步。
       </p>
 
       {/* Status summary */}
@@ -253,7 +284,7 @@ function DepsStep({ deps, onRecheck }: { deps?: DepsInfo; onRecheck?: () => void
         lineHeight: 1.6,
       }}>
         {missingCritical
-          ? "❌ 缺少 Python — 无法运行 ASR 转写和管线脚本。仅可处理纯文本/文章。"
+          ? `❌ 当前路径缺少必需依赖：${blockingDeps.join("、")}。请补齐后重新检测。`
           : missingOptional
             ? "⚠️ 部分工具缺失 — 视频下载和转写功能受限，文章处理正常。"
             : "✅ 全部依赖就绪 — 可处理文章、视频和本地文件"}

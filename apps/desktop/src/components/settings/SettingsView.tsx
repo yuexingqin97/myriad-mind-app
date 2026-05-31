@@ -39,6 +39,7 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard, onNa
       setDeps({
         python: toDepInfo(all["python"]),
         ffmpeg: toDepInfo(all["ffmpeg"]),
+        fasterWhisper: toDepInfo(all["faster-whisper"]),
         ytdlp: toDepInfo(all["yt-dlp"]),
         gpu: toDepInfo(all["gpu"]),
       });

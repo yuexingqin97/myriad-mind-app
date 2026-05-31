@@ -22,6 +22,12 @@ pub enum AiTask {
     ResourceRecommend,
     #[serde(rename = "next_step_suggestion")]
     NextStepSuggestion,
+    #[serde(rename = "screenshot_review")]
+    ScreenshotReview,
+    #[serde(rename = "subtitle_analysis")]
+    SubtitleAnalysis,
+    #[serde(rename = "tutorial_detection")]
+    TutorialDetection,
 }
 
 impl std::fmt::Display for AiTask {
@@ -34,6 +40,9 @@ impl std::fmt::Display for AiTask {
             Self::Compare => write!(f, "对比"),
             Self::ResourceRecommend => write!(f, "资源推荐"),
             Self::NextStepSuggestion => write!(f, "下一步建议"),
+            Self::ScreenshotReview => write!(f, "截图审查"),
+            Self::SubtitleAnalysis => write!(f, "字幕分析"),
+            Self::TutorialDetection => write!(f, "教程检测"),
         }
     }
 }
@@ -107,17 +116,33 @@ pub struct MindResponse {
 #[serde(tag = "type")]
 pub enum MindStreamEvent {
     #[serde(rename = "start")]
-    Start { task: String, provider: String, model: String },
+    Start {
+        task: String,
+        provider: String,
+        model: String,
+    },
     #[serde(rename = "reasoning_delta")]
     ReasoningDelta { delta: String },
     #[serde(rename = "delta")]
     Delta { delta: String },
     #[serde(rename = "usage")]
-    Usage { input_tokens: Option<u32>, output_tokens: Option<u32>, reasoning_tokens: Option<u32>, total_tokens: Option<u32> },
+    Usage {
+        input_tokens: Option<u32>,
+        output_tokens: Option<u32>,
+        reasoning_tokens: Option<u32>,
+        total_tokens: Option<u32>,
+    },
     #[serde(rename = "done")]
-    Done { text: String, finish_reason: Option<String> },
+    Done {
+        text: String,
+        finish_reason: Option<String>,
+    },
     #[serde(rename = "error")]
-    Error { code: String, message: String, retryable: bool },
+    Error {
+        code: String,
+        message: String,
+        retryable: bool,
+    },
 }
 
 // ---- 错误分类 ----
@@ -163,6 +188,124 @@ impl AiErrorKind {
             "model_not_found" => "模型不存在，请检查模型名称",
             "provider_not_configured" => "未配置 DeepSeek API Key",
             _ => "AI 响应解析失败",
+        }
+    }
+}
+
+// ============================================================
+// 视觉功能类型 (DeepSeek V4 Vision)
+// ============================================================
+
+/// 视觉消息（支持图片 + 文本）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisionMessage {
+    pub role: String,
+    /// content 为 [{type: "text", text: "..."}, {type: "image_url", image_url: {url: "..."}}]
+    pub content: Vec<VisionContentBlock>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum VisionContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image_url")]
+    ImageUrl { image_url: ImageUrl },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageUrl {
+    /// base64 data URL (data:image/png;base64,...) or http URL
+    pub url: String,
+    /// 可选 detail 字段（DeepSeek 兼容但不强制）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// 视觉请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisionRequest {
+    pub task: AiTask,
+    pub messages: Vec<VisionMessage>,
+    pub system_prompt: String,
+    pub max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
+}
+
+// ---- 字幕分析 ----
+
+/// 字幕引导截图时间点（步骤 4.5 输出）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuidedTimestamp {
+    pub ts: f64,
+    pub reason: String,
+}
+
+// ---- 截图审查 ----
+
+/// 单张截图的审查结论（步骤 7.1 输出）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrameReview {
+    pub type_tag: String,
+    /// 信息增量评分 0-3
+    pub info_score: u8,
+    /// 与上一张的相似度 0.0-1.0
+    pub similarity_vs_prev: f64,
+    /// 推荐嵌入的笔记章节
+    pub embed_section: String,
+    /// 审查理由（20 字以内）
+    pub reason: String,
+}
+
+/// 审查通过的截图
+#[derive(Debug, Clone, Serialize)]
+pub struct ReviewedFrame {
+    pub file: String,
+    pub timestamp_seconds: f64,
+    pub timestamp_label: String,
+    pub trigger: String,
+    pub review: FrameReview,
+}
+
+/// 截图审查汇总
+#[derive(Debug, Clone, Serialize)]
+pub struct ScreenshotReviewResult {
+    pub total: usize,
+    pub selected: Vec<ReviewedFrame>,
+    pub skipped: usize,
+    /// 审查表（Markdown 格式，供注入笔记 prompt）
+    pub review_table: String,
+}
+
+// ---- 教程检测 ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TutorialDetectionResult {
+    pub is_tutorial: bool,
+    pub confidence: f64,
+    pub signals: Vec<String>,
+}
+
+// ---- 截图审查配置 ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScreenshotReviewConfig {
+    pub enabled: bool,
+    pub mode: String, // "batch" | "single" | "hybrid"
+    pub max_review_frames: usize,
+    pub min_score: u8,
+    pub max_selected: usize,
+}
+
+impl Default for ScreenshotReviewConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mode: "hybrid".into(),
+            max_review_frames: 25,
+            min_score: 2,
+            max_selected: 15,
         }
     }
 }

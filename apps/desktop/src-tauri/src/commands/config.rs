@@ -66,9 +66,7 @@ pub fn is_first_launch() -> bool {
 pub async fn read_config() -> Result<String, AppError> {
     let path = config_file();
     if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| {
-            AppError::Config(format!("读取配置失败: {e}"))
-        })
+        std::fs::read_to_string(&path).map_err(|e| AppError::Config(format!("读取配置失败: {e}")))
     } else {
         Ok("{}".to_string())
     }
@@ -78,21 +76,16 @@ pub async fn read_config() -> Result<String, AppError> {
 #[tauri::command]
 pub async fn write_config(content: String) -> Result<(), AppError> {
     let dir = config_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| {
-        AppError::Config(format!("创建配置目录失败: {e}"))
-    })?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| AppError::Config(format!("创建配置目录失败: {e}")))?;
 
     let path = config_file();
     let tmp = dir.join("config.json.tmp");
 
     // 原子写入
-    std::fs::write(&tmp, &content).map_err(|e| {
-        AppError::Config(format!("写入配置失败: {e}"))
-    })?;
+    std::fs::write(&tmp, &content).map_err(|e| AppError::Config(format!("写入配置失败: {e}")))?;
 
-    std::fs::rename(&tmp, &path).map_err(|e| {
-        AppError::Config(format!("保存配置失败: {e}"))
-    })?;
+    std::fs::rename(&tmp, &path).map_err(|e| AppError::Config(format!("保存配置失败: {e}")))?;
 
     Ok(())
 }
@@ -102,9 +95,7 @@ pub async fn write_config(content: String) -> Result<(), AppError> {
 pub async fn reset_config() -> Result<(), AppError> {
     let path = config_file();
     if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| {
-            AppError::Config(format!("删除配置失败: {e}"))
-        })?;
+        std::fs::remove_file(&path).map_err(|e| AppError::Config(format!("删除配置失败: {e}")))?;
     }
     Ok(())
 }
@@ -175,15 +166,11 @@ pub async fn store_keychain_entry(
 
 /// 从 OS 密钥链读取凭据
 #[tauri::command]
-pub async fn read_keychain_entry(
-    service: String,
-    account: String,
-) -> Result<String, AppError> {
+pub async fn read_keychain_entry(service: String, account: String) -> Result<String, AppError> {
     #[cfg(target_os = "windows")]
     {
-        windows_credentials(&service, &account)?.ok_or_else(|| {
-            AppError::Config(format!("密钥链中未找到: {service}/{account}"))
-        })
+        windows_credentials(&service, &account)?
+            .ok_or_else(|| AppError::Config(format!("密钥链中未找到: {service}/{account}")))
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -207,11 +194,10 @@ pub fn cred_read(service: &str) -> Result<Option<String>, String> {
 
 #[cfg(target_os = "windows")]
 mod windows_cred {
-    use windows::core::{HSTRING, PWSTR};
     use windows::Win32::Security::Credentials::{
-        CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
-        CRED_TYPE_GENERIC,
+        CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredFree, CredReadW, CredWriteW,
     };
+    use windows::core::{HSTRING, PWSTR};
 
     /// 读取凭据，返回 UTF-8 密码；不存在返回 None
     pub fn read(target: &str) -> Result<Option<String>, String> {
@@ -219,8 +205,7 @@ mod windows_cred {
 
         let mut cred_ptr: *mut CREDENTIALW = std::ptr::null_mut();
 
-        let result =
-            unsafe { CredReadW(&target_h, CRED_TYPE_GENERIC, None, &mut cred_ptr) };
+        let result = unsafe { CredReadW(&target_h, CRED_TYPE_GENERIC, None, &mut cred_ptr) };
 
         if result.is_err() || cred_ptr.is_null() {
             return Ok(None);
@@ -249,18 +234,11 @@ mod windows_cred {
     }
 
     /// 写入凭据
-    pub fn write(
-        target: &str,
-        username: &str,
-        secret: &str,
-    ) -> Result<(), String> {
-        let target_wide: Vec<u16> =
-            target.encode_utf16().chain(std::iter::once(0)).collect();
-        let username_wide: Vec<u16> =
-            username.encode_utf16().chain(std::iter::once(0)).collect();
+    pub fn write(target: &str, username: &str, secret: &str) -> Result<(), String> {
+        let target_wide: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
+        let username_wide: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect();
         let secret_utf16: Vec<u16> = secret.encode_utf16().collect();
-        let blob_bytes: Vec<u8> =
-            secret_utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let blob_bytes: Vec<u8> = secret_utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
 
         use windows::Win32::Security::Credentials::CRED_FLAGS;
 
@@ -283,8 +261,7 @@ mod windows_cred {
         };
 
         unsafe {
-            CredWriteW(&credential, 0)
-                .map_err(|e| format!("CredWriteW 失败: {e:?}"))?;
+            CredWriteW(&credential, 0).map_err(|e| format!("CredWriteW 失败: {e:?}"))?;
         }
 
         Ok(())
@@ -292,20 +269,13 @@ mod windows_cred {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_credentials(
-    service: &str,
-    _account: &str,
-) -> Result<Option<String>, String> {
+fn windows_credentials(service: &str, _account: &str) -> Result<Option<String>, String> {
     let target = format!("myriad-mind/{service}");
     windows_cred::read(&target)
 }
 
 #[cfg(target_os = "windows")]
-fn windows_credentials_write(
-    service: &str,
-    account: &str,
-    secret: &str,
-) -> Result<(), String> {
+fn windows_credentials_write(service: &str, account: &str, secret: &str) -> Result<(), String> {
     let target = format!("myriad-mind/{service}");
     windows_cred::write(&target, account, secret)
 }

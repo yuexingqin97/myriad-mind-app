@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -51,8 +53,10 @@ def build_ytdlp_command(
     output_stem: Path,
     languages: Sequence[str],
 ) -> list[str]:
+    ytdlp = os.getenv("YTDLP_BIN") or shutil.which("yt-dlp") or shutil.which("yt-dlp.exe")
+    command = [ytdlp] if ytdlp else [sys.executable, "-m", "yt_dlp"]
     return [
-        "yt-dlp",
+        *command,
         "--ignore-config",
         "--ignore-no-formats-error",
         "--skip-download",

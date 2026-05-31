@@ -17,6 +17,7 @@ export interface DepInfo {
 export interface DepsInfo {
   python: DepInfo;
   ffmpeg: DepInfo;
+  fasterWhisper: DepInfo;
   ytdlp: DepInfo;
   gpu: DepInfo;
 }

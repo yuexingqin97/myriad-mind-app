@@ -113,6 +113,16 @@ export function SettingsPage({
       items.push({ label: "Python", icon: "🐍", status: "unconfigured", detail: "未检测" });
     }
 
+    if (deps?.fasterWhisper) {
+      items.push({
+        label: "ASR", icon: "🎙️",
+        status: deps.fasterWhisper.found ? "ok" : "error",
+        detail: deps.fasterWhisper.version ?? (deps.fasterWhisper.found ? "就绪" : "未安装"),
+      });
+    } else {
+      items.push({ label: "ASR", icon: "🎙️", status: "unconfigured", detail: "未检测" });
+    }
+
     // FFmpeg
     if (deps?.ffmpeg) {
       items.push({
@@ -495,6 +505,9 @@ function ProcessingTab({
             { label: "FFmpeg", icon: "🎞️", dep: deps.ffmpeg, critical: false,
               usage: "视频解码、音频提取、关键帧截图 — 处理视频必需",
               fix: "winget install FFmpeg 或 ffmpeg.org 下载" },
+            { label: "faster-whisper", icon: "🎙️", dep: deps.fasterWhisper, critical: true,
+              usage: "本地 ASR 转写 — 没有可用字幕时必须回退到它生成字幕",
+              fix: "使用应用检测到的 Python 执行：python -m pip install -U faster-whisper" },
             { label: "yt-dlp", icon: "⬇️", dep: deps.ytdlp, critical: false,
               usage: "下载在线视频、提取字幕 — YouTube/B 站等平台依赖",
               fix: "winget install yt-dlp.yt-dlp 或 pip install yt-dlp" },
@@ -706,8 +719,72 @@ function FeaturesTab({
                 value={config.keyframes.mode}
                 onChange={(e) => update("keyframes", { ...config.keyframes, mode: e.target.value as "interval" | "scene" | "both" })} />
             </div>
+
+            {/* ---- AI 截图审查 ---- */}
+            <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 8,
+              border: "1px solid rgba(22,131,255,0.2)", background: "rgba(22,131,255,0.04)" }}>
+              <Toggle label="🤖 AI 智能截图审查"
+                description="使用 DeepSeek Vision 逐张分析截图价值，自动过滤纯人脸、黑屏、过渡画面"
+                checked={config.features.screenshot_review?.enabled ?? true}
+                onChange={(v) => update("features", {
+                  ...config.features,
+                  screenshot_review: { ...config.features.screenshot_review!, enabled: v },
+                })} />
+              {config.features.screenshot_review?.enabled && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+                  <Select label="审查模式"
+                    options={[
+                      { value: "hybrid", label: "混合模式 — 先批量粗筛再逐张精审（推荐）" },
+                      { value: "batch", label: "批量模式 — 一次提交全部截图" },
+                      { value: "single", label: "逐张模式 — 最高精度，较慢" },
+                    ]}
+                    value={config.features.screenshot_review.mode}
+                    onChange={(e) => update("features", {
+                      ...config.features,
+                      screenshot_review: {
+                        ...config.features.screenshot_review!,
+                        mode: e.target.value as "hybrid" | "batch" | "single",
+                      },
+                    })} />
+                  <div style={{ display: "flex", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <Input label="最低入选分数 (0-3)"
+                        type="number" min={0} max={3}
+                        value={config.features.screenshot_review.min_score}
+                        onChange={(e) => update("features", {
+                          ...config.features,
+                          screenshot_review: {
+                            ...config.features.screenshot_review!,
+                            min_score: Math.max(0, Math.min(3, Number(e.target.value) || 2)),
+                          },
+                        })} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <Input label="最多入选张数 (3-20)"
+                        type="number" min={3} max={20}
+                        value={config.features.screenshot_review.max_selected}
+                        onChange={(e) => update("features", {
+                          ...config.features,
+                          screenshot_review: {
+                            ...config.features.screenshot_review!,
+                            max_selected: Math.max(3, Math.min(20, Number(e.target.value) || 15)),
+                          },
+                        })} />
+                    </div>
+                  </div>
+                </div>
+              )}
+              <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "8px 0 0" }}>
+                每张截图约 81 tokens，一个视频 25 张候选截图全部审查约 0.015 元
+              </p>
+            </div>
           </div>
         )}
+
+        <Toggle label="📋 教程模式检测"
+          description="自动识别操作型教程（如 IDE 配置、软件操作），生成操作流程总览图"
+          checked={config.features.tutorial_detection}
+          onChange={() => toggle("tutorial_detection")} />
       </SettingsSection>
 
       <SettingsSection title="笔记信息">

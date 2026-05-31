@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -18,6 +19,7 @@ class Keyframe:
     file: str
     timestamp_seconds: float
     timestamp_label: str
+    trigger: str = "interval"
 
 
 @dataclass(frozen=True)
@@ -61,17 +63,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--max-frames",
         type=int,
-        default=int(env_or_default("KF_MAX_FRAMES", "50") or "50"),
-        help="Maximum number of keyframes to extract. Default: KF_MAX_FRAMES env or 50.",
+        default=int(env_or_default("KF_MAX_FRAMES", "40") or "40"),
+        help="Maximum number of keyframes to extract. Default: KF_MAX_FRAMES env or 40.",
     )
     parser.add_argument(
         "--mode",
         choices=("interval", "scene", "both"),
-        default=env_or_default("KF_MODE", "interval") or "interval",
+        default=env_or_default("KF_MODE", "both") or "both",
         help=(
             "Extraction mode: 'interval' (every N seconds), "
             "'scene' (scene change detection), or 'both'. "
-            "Default: KF_MODE env or interval."
+            "Default: KF_MODE env or both."
+        ),
+    )
+    parser.add_argument(
+        "--timestamps",
+        help=(
+            "Optional JSON file of guided timestamps. Accepts an array of "
+            '{"ts": seconds, "reason": "..."} objects or raw numbers.'
         ),
     )
     return parser.parse_args(argv)
@@ -132,6 +141,89 @@ def get_video_duration(video_path: str, ffmpeg_bin: str) -> float | None:
         return None
 
 
+def timestamp_label(seconds_value: float) -> str:
+    seconds_int = max(0, int(round(seconds_value)))
+    minutes, seconds = divmod(seconds_int, 60)
+    hours, minutes = divmod(minutes, 60)
+    return (
+        f"{hours:02d}h{minutes:02d}m{seconds:02d}s"
+        if hours > 0
+        else f"{minutes:02d}m{seconds:02d}s"
+    )
+
+
+def slug_reason(reason: str) -> str:
+    cleaned = re.sub(r"\s+", "_", reason.strip())
+    cleaned = re.sub(r"[^\w\u4e00-\u9fff_-]+", "", cleaned)
+    return cleaned[:24] or "guided"
+
+
+def load_guided_timestamps(path: str | None) -> list[tuple[float, str]]:
+    if not path:
+        return []
+
+    timestamp_path = Path(path).expanduser().resolve()
+    if not timestamp_path.exists():
+        return []
+
+    raw = json.loads(timestamp_path.read_text(encoding="utf-8"))
+    items = raw.get("timestamps", raw) if isinstance(raw, dict) else raw
+    result: list[tuple[float, str]] = []
+
+    for item in items:
+        if isinstance(item, (int, float)):
+            result.append((float(item), "AI推荐"))
+        elif isinstance(item, dict):
+            ts = item.get("ts", item.get("timestamp", item.get("timestamp_seconds")))
+            if ts is None:
+                continue
+            result.append((float(ts), str(item.get("reason", "AI推荐"))))
+
+    deduped: list[tuple[float, str]] = []
+    for ts, reason in sorted(result, key=lambda value: value[0]):
+        if ts < 0:
+            continue
+        if deduped and abs(deduped[-1][0] - ts) < 2:
+            continue
+        deduped.append((ts, reason))
+    return deduped
+
+
+def extract_guided_frames(
+    video_path: str,
+    output_dir: Path,
+    timestamps: list[tuple[float, str]],
+    max_frames: int,
+    ffmpeg_bin: str,
+) -> list[Keyframe]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    keyframes: list[Keyframe] = []
+
+    for index, (ts, reason) in enumerate(timestamps[:max_frames], start=1):
+        output = output_dir / f"guided_{index:04d}_{slug_reason(reason)}.png"
+        cmd = [
+            ffmpeg_bin,
+            "-ss", f"{ts:.3f}",
+            "-i", str(video_path),
+            "-frames:v", "1",
+            "-q:v", "2",
+            "-y",
+            str(output),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        if output.exists():
+            keyframes.append(
+                Keyframe(
+                    file=output.name,
+                    timestamp_seconds=float(ts),
+                    timestamp_label=timestamp_label(ts),
+                    trigger=f"guided:{reason}",
+                )
+            )
+
+    return keyframes
+
+
 def extract_interval_frames(
     video_path: str,
     output_dir: Path,
@@ -167,18 +259,12 @@ def extract_interval_frames(
         stem = png.stem  # e.g. "frame_0001"
         num = int(stem.split("_")[1])
         ts = (num - 1) * interval
-        minutes, seconds = divmod(int(ts), 60)
-        hours, minutes = divmod(minutes, 60)
-        label = (
-            f"{hours:02d}h{minutes:02d}m{seconds:02d}s"
-            if hours > 0
-            else f"{minutes:02d}m{seconds:02d}s"
-        )
         keyframes.append(
             Keyframe(
                 file=png.name,
                 timestamp_seconds=float(ts),
-                timestamp_label=label,
+                timestamp_label=timestamp_label(ts),
+                trigger="interval",
             )
         )
 
@@ -190,7 +276,7 @@ def extract_scene_frames(
     output_dir: Path,
     max_frames: int,
     ffmpeg_bin: str,
-    threshold: float = 0.3,
+    threshold: float = 0.12,
 ) -> list[Keyframe]:
     """Extract frames at scene changes."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -216,18 +302,13 @@ def extract_scene_frames(
     for i, png in enumerate(sorted(output_dir.glob("scene_*.png")), start=1):
         # Estimate timestamp from frame number (rough)
         # For accurate timestamps we'd need to parse ffmpeg output
-        minutes, seconds = divmod(i * 10, 60)  # rough estimate
-        hours, minutes = divmod(minutes, 60)
-        label = (
-            f"{hours:02d}h{minutes:02d}m{seconds:02d}s"
-            if hours > 0
-            else f"{minutes:02d}m{seconds:02d}s"
-        )
+        ts = float(i * 10)
         keyframes.append(
             Keyframe(
                 file=png.name,
-                timestamp_seconds=float(i * 10),  # rough estimate
-                timestamp_label=label,
+                timestamp_seconds=ts,
+                timestamp_label=timestamp_label(ts),
+                trigger="scene",
             )
         )
 
@@ -240,6 +321,7 @@ def extract_keyframes(
     mode: str,
     interval: int,
     max_frames: int,
+    timestamps_path: str | None = None,
 ) -> ExtractResult:
     """Main extraction logic."""
     ffmpeg_bin = find_ffmpeg()
@@ -250,6 +332,13 @@ def extract_keyframes(
     frames_dir = output_dir / "frames"
     all_keyframes: list[Keyframe] = []
 
+    guided_timestamps = load_guided_timestamps(timestamps_path)
+    if guided_timestamps:
+        guided_frames = extract_guided_frames(
+            video_path, frames_dir, guided_timestamps, max_frames, ffmpeg_bin
+        )
+        all_keyframes.extend(guided_frames)
+
     if mode in ("interval", "both"):
         interval_frames = extract_interval_frames(
             video_path, frames_dir, interval, max_frames, ffmpeg_bin
@@ -258,8 +347,9 @@ def extract_keyframes(
 
     if mode in ("scene", "both"):
         scene_max = max_frames if mode == "scene" else max(max_frames // 3, 5)
+        threshold = float(env_or_default("KF_SCENE_THRESHOLD", "0.12") or "0.12")
         scene_frames = extract_scene_frames(
-            video_path, frames_dir, scene_max, ffmpeg_bin
+            video_path, frames_dir, scene_max, ffmpeg_bin, threshold
         )
         all_keyframes.extend(scene_frames)
 
@@ -312,6 +402,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             mode=args.mode,
             interval=args.interval,
             max_frames=args.max_frames,
+            timestamps_path=args.timestamps,
         )
     except Exception as exc:  # pragma: no cover - CLI error handling
         print(f"ERROR: {exc}", file=sys.stderr)
