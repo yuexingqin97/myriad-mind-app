@@ -326,11 +326,34 @@ async fn run_text_pipeline(
         }
     }
 
+    // 检查指纹 — 是否命中已有笔记
+    let fingerprint = crate::commands::notes::simple_hash(input);
+    let existing_note = check_fingerprint_hit(note_dir, &fingerprint);
+    let is_update = existing_note.is_some();
+
+    if let Some(ref existing) = existing_note {
+        emit_progress(app, "generate_note",
+            &format!("🔁 命中已有笔记: {}", existing.path),
+            48.0, "running",
+            Some("检测到此输入曾炼化过，将基于已有笔记增量更新"));
+    }
+
     emit_progress(app, "generate_note", "🤖 AI 生成笔记 (DeepSeek V4 Pro)", 50.0, "running",
         Some("正在调用 AI 模型，流式输出中…"));
 
+    // 准备增强上下文
+    let enhanced_content = if let Some(ref existing) = existing_note {
+        format!(
+            "## 已有笔记（请在此基础上更新）\n\n{}\n\n---\n\n## 本次新增材料\n\n{}",
+            existing.content, text
+        )
+    } else {
+        text.clone()
+    };
+
     // 调用 MindEngine (DeepSeek V4 Pro)
-    match ai::generate_note(app, &text, "文本", Some(note_dir), task_prompt).await {
+    let ai_task_hint = if is_update { "更新已有笔记" } else { "生成新笔记" };
+    match ai::generate_note(app, &enhanced_content, ai_task_hint, Some(note_dir), task_prompt).await {
         Ok(note) => {
             emit_progress(app, "save", "💾 保存笔记", 90.0, "running", None);
 
@@ -338,15 +361,19 @@ async fn run_text_pipeline(
             let source_type = if input.starts_with("http") { "article" } else { "file" };
             match crate::commands::notes::save_note(
                 &note, input, source_type, note_dir, note_category, debug_metadata,
+                existing_note.as_ref().map(|n| n.path.as_str()),
             ) {
                 Ok(result) => {
                     // 更新 .myriad-mind 索引
                     let fingerprint = crate::commands::notes::simple_hash(input);
                     let note_id = format!("note_{fingerprint}");
+                    emit_progress(app, "library", "📝 更新知识库索引", 96.0, "running",
+                        Some(&format!("分类: {} · v{}", result.category, result.version)));
                     let _ = crate::commands::library::update_library_after_save(
                         note_dir, &result.path, &result.title, &result.category,
                         result.version, input, source_type, &fingerprint, &note_id, &note,
                     );
+                    emit_progress(app, "library", "索引已同步", 97.0, "completed", None);
 
                     let detail = format!(
                         "📁 {}/{}.md\n📝 v{} · {} 字符",
@@ -393,6 +420,35 @@ fn emit_progress(
     if let Err(e) = app.emit("pipeline-progress", event) {
         log::error!("[pipeline] emit failed: {e}");
     }
+}
+
+struct ExistingNote {
+    path: String,
+    content: String,
+}
+
+/// Check if this fingerprint already exists in the library
+fn check_fingerprint_hit(base_dir: &str, fingerprint: &str) -> Option<ExistingNote> {
+    let fp_path = std::path::PathBuf::from(base_dir)
+        .join(".myriad-mind")
+        .join("fingerprints.json");
+
+    if let Ok(data) = std::fs::read_to_string(&fp_path) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+            let fp_key = format!("sha256:{fingerprint}");
+            if let Some(entry) = json["items"].get(&fp_key) {
+                let path = entry["path"].as_str().unwrap_or("").to_string();
+                let full_path = std::path::PathBuf::from(base_dir).join(&path);
+                if full_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&full_path) {
+                        log::info!("[pipeline] fingerprint hit: {path}");
+                        return Some(ExistingNote { path, content });
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn count_md_files(dir: &str) -> usize {

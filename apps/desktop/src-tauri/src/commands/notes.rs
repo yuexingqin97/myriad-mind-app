@@ -36,6 +36,7 @@ fn keyword_categories() -> Vec<(&'static str, Vec<&'static str>)> {
 // ---- 主入口 ----
 
 /// 保存 AI 生成的笔记。结构: base_dir/分类/标题.md + base_dir/分类/assets/
+/// target_path: 如果指定，直接使用此路径（用于指纹命中时覆盖已有文件）
 pub fn save_note(
     ai_output: &str,
     source_input: &str,
@@ -43,6 +44,7 @@ pub fn save_note(
     base_dir: &str,
     user_category: Option<&str>,
     debug_metadata: bool,
+    target_path: Option<&str>,
 ) -> Result<NoteSaveResult, AppError> {
     let title = extract_title(ai_output).unwrap_or_else(|| "未命名笔记".to_string());
     let safe_name = title_to_slug(&title);
@@ -58,7 +60,11 @@ pub fn save_note(
         .map_err(|e| AppError::Config(format!("创建分类目录失败: {e}")))?;
     std::fs::create_dir_all(cat_dir.join("assets")).ok();
 
-    let note_path = resolve_path(&cat_dir, &safe_name);
+    let note_path = if let Some(tp) = target_path {
+        PathBuf::from(base_dir).join(tp)
+    } else {
+        resolve_path(&cat_dir, &safe_name)
+    };
 
     let old_content = if note_path.exists() {
         std::fs::read_to_string(&note_path).unwrap_or_default()
