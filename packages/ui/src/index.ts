@@ -27,7 +27,7 @@ export type {
 
 // ConfigWizard
 export { ConfigWizard } from "./ConfigWizard.js";
-export type { ConfigWizardProps } from "./ConfigWizard.js";
+export type { ConfigWizardProps, KeychainApi } from "./ConfigWizard.js";
 
 // NoteRenderer
 export { NoteRenderer, renderMarkdown } from "./NoteRenderer.js";

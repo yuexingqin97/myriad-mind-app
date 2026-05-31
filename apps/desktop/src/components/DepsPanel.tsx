@@ -1,12 +1,18 @@
 // ============================================================
 // DepsPanel — 系统依赖检测面板
+// 优先使用配置中的 python_path，回退到自动探测
 // ============================================================
 
 import { useEffect, useState } from "react";
 import * as api from "../api";
 import type { DepResult } from "../api";
 
-export function DepsPanel() {
+interface DepsPanelProps {
+  /** 配置中的 Python 路径，传给 Rust detect_all_deps */
+  pythonPath?: string;
+}
+
+export function DepsPanel({ pythonPath }: DepsPanelProps) {
   const [deps, setDeps] = useState<Record<string, DepResult>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,7 +20,7 @@ export function DepsPanel() {
   useEffect(() => {
     (async () => {
       try {
-        const all = await api.detectAllDeps();
+        const all = await api.detectAllDeps(pythonPath || undefined);
         setDeps(all);
       } catch (e) {
         setError(String(e));
@@ -22,7 +28,7 @@ export function DepsPanel() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [pythonPath]);
 
   if (loading) {
     return (

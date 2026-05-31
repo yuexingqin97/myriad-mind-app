@@ -11,10 +11,13 @@ use commands::{
         check_keychain_entry, get_config_info, is_first_launch, read_config,
         read_keychain_entry, reset_config, store_keychain_entry, write_config,
     },
-    deps::{detect_all_deps, detect_ffmpeg, detect_gpu, detect_python, detect_ytdlp},
+    deps::{detect_all_deps, detect_ffmpeg, detect_gpu, detect_python, detect_python_auto, detect_ytdlp},
     fs::{cleanup_temp, copy_asset, read_text_file, scan_directory, write_note},
     pipeline::execute_pipeline,
-    python::{check_python_env, extract_keyframes, transcribe_audio},
+    python::{
+        check_python_env, download_video, download_youtube_subtitles, extract_keyframes,
+        install_faster_whisper, list_ai_douyin_tasks, transcribe_audio,
+    },
 };
 
 /// Tauri 命令：健康检查 / 依赖状态
@@ -39,6 +42,7 @@ pub fn run() {
             get_version,
             // 依赖检测
             detect_python,
+            detect_python_auto,
             detect_ffmpeg,
             detect_ytdlp,
             detect_gpu,
@@ -52,9 +56,13 @@ pub fn run() {
             check_keychain_entry,
             store_keychain_entry,
             read_keychain_entry,
-            // Python 调度
+            // Python 调度 (6 脚本)
             transcribe_audio,
             extract_keyframes,
+            download_video,
+            download_youtube_subtitles,
+            install_faster_whisper,
+            list_ai_douyin_tasks,
             check_python_env,
             // Claude API
             stream_note_generation,

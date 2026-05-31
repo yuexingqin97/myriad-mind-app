@@ -1,6 +1,7 @@
 // ============================================================
 // ConfigWizard — 多步骤配置向导
 // 基于 @myriad-mind/core 的 Zod Schema 实现配置表单
+// API Key 通过 OS 密钥链管理，不明文存储
 // ============================================================
 
 import React, { useState } from "react";
@@ -13,12 +14,22 @@ export interface ConfigWizardProps {
   config: MyriadMindConfig;
   onSave: (config: MyriadMindConfig) => void;
   onCancel?: () => void;
+  /** 密钥链操作接口 — 由 app 层注入，实现 OS 密钥链读写 */
+  keychain?: KeychainApi;
 }
 
-type StepId = "asr" | "video" | "features" | "keyframes" | "output" | "post";
+/** 密钥链操作接口 — 抽象 Tauri IPC 和浏览器 localStorage */
+export interface KeychainApi {
+  check(service: string): Promise<boolean>;
+  read(service: string): Promise<string>;
+  store(service: string, secret: string): Promise<void>;
+}
+
+type StepId = "asr" | "api_keys" | "video" | "features" | "keyframes" | "output" | "post";
 
 const STEPS: Array<{ id: StepId; title: string; icon: string }> = [
   { id: "asr", title: "语音识别", icon: "🎙️" },
+  { id: "api_keys", title: "API 密钥", icon: "🔑" },
   { id: "video", title: "视频解析", icon: "📹" },
   { id: "features", title: "功能开关", icon: "⚙️" },
   { id: "keyframes", title: "关键帧", icon: "🖼️" },
@@ -30,6 +41,7 @@ export function ConfigWizard({
   config: initialConfig,
   onSave,
   onCancel,
+  keychain,
 }: ConfigWizardProps) {
   const [step, setStep] = useState(0);
   const [config, setConfig] = useState<MyriadMindConfig>({
@@ -95,17 +107,279 @@ export function ConfigWizard({
       {/* 步骤内容 */}
       <div className="min-h-[300px]">
         {step === 0 && <ASRStep config={config} update={update} />}
-        {step === 1 && <VideoStep config={config} update={update} />}
-        {step === 2 && <FeaturesStep config={config} update={update} />}
-        {step === 3 && <KeyframesStep config={config} update={update} />}
-        {step === 4 && <OutputStep config={config} update={update} />}
-        {step === 5 && <PostProcessStep config={config} update={update} />}
+        {step === 1 && <ApiKeysStep keychain={keychain} />}
+        {step === 2 && <VideoStep config={config} update={update} />}
+        {step === 3 && <FeaturesStep config={config} update={update} />}
+        {step === 4 && <KeyframesStep config={config} update={update} />}
+        {step === 5 && <OutputStep config={config} update={update} />}
+        {step === 6 && <PostProcessStep config={config} update={update} />}
       </div>
     </Card>
   );
 }
 
-// ---- 各步骤组件 ----
+// ============================================================
+// API Key 管理步骤
+// ============================================================
+
+/** 密钥服务 ID → 显示信息 */
+const KEY_DEFS: Array<{
+  service: string;
+  label: string;
+  description: string;
+  placeholder: string;
+  required: boolean;
+}> = [
+  {
+    service: "claude-api-key",
+    label: "Claude API Key",
+    description: "Anthropic 控制台 → API Keys → Create Key。格式: sk-ant-api03-...",
+    placeholder: "sk-ant-api03-...",
+    required: true,
+  },
+  {
+    service: "ai-douyin-api-key",
+    label: "AI Douyin API Key",
+    description: "抖音/B 站/小红书视频解析。aidouyin.com 注册获取",
+    placeholder: "输入 AI Douyin API Key...",
+    required: false,
+  },
+  {
+    service: "tikhub-token",
+    label: "TikHub Token",
+    description: "视频解析备用方案。tikhub.io 注册获取",
+    placeholder: "输入 TikHub Token...",
+    required: false,
+  },
+  {
+    service: "volcengine-token",
+    label: "火山引擎 Token",
+    description: "云端 ASR 后端。火山引擎控制台 → 语音技术 → 获取 Token",
+    placeholder: "输入火山引擎 Token...",
+    required: false,
+  },
+];
+
+function ApiKeysStep({ keychain }: { keychain?: KeychainApi }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        所有密钥存储在 OS 密钥链（Windows Credential Manager），绝不明文落盘。
+        <br />
+        Claude API Key 为必填项，其余按需配置。
+      </p>
+      {KEY_DEFS.map((def) => (
+        <ApiKeyField
+          key={def.service}
+          service={def.service}
+          label={def.label}
+          description={def.description}
+          placeholder={def.placeholder}
+          required={def.required}
+          keychain={keychain}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** 单个 API Key 字段 — 查询/编辑/存储 */
+function ApiKeyField({
+  service,
+  label,
+  description,
+  placeholder,
+  required,
+  keychain,
+}: {
+  service: string;
+  label: string;
+  description: string;
+  placeholder: string;
+  required: boolean;
+  keychain?: KeychainApi;
+}) {
+  const [status, setStatus] = useState<"loading" | "set" | "empty">("loading");
+  const [masked, setMasked] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 检查密钥链中是否已有此 Key
+  React.useEffect(() => {
+    if (!keychain) {
+      setStatus("empty");
+      return;
+    }
+    keychain
+      .check(service)
+      .then((exists) => {
+        if (exists) {
+          return keychain.read(service).then((secret) => {
+            setMasked(maskSecret(secret));
+            setStatus("set");
+          });
+        }
+        setStatus("empty");
+      })
+      .catch(() => setStatus("empty"));
+  }, [service, keychain]);
+
+  const handleSave = async () => {
+    if (!inputValue.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await keychain?.store(service, inputValue.trim());
+      setMasked(maskSecret(inputValue.trim()));
+      setStatus("set");
+      setEditing(false);
+      setInputValue("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    // 存储空字符串等效于删除
+    try {
+      await keychain?.store(service, "");
+      setStatus("empty");
+      setMasked("");
+      setEditing(false);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 8,
+        border: `1px solid ${status === "set" ? "rgba(74,222,128,0.3)" : required ? "rgba(248,113,113,0.3)" : "rgba(250,204,21,0.3)"}`,
+        background: "var(--bg-surface, rgba(255,255,255,0.02))",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontWeight: 600, fontSize: 13 }}>{label}</span>
+          {required && <span style={{ fontSize: 10, color: "#f87171" }}>必填</span>}
+          {status === "set" && <span style={{ fontSize: 11, color: "#4ade80" }}>✅ 已配置</span>}
+          {status === "empty" && !required && <span style={{ fontSize: 11, color: "#facc15" }}>可选</span>}
+        </div>
+        {!editing && (
+          <button
+            onClick={() => setEditing(true)}
+            style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              borderRadius: 4,
+              border: "1px solid var(--border, #333)",
+              background: "transparent",
+              color: "var(--text-secondary, #aaa)",
+              cursor: "pointer",
+            }}
+          >
+            {status === "set" ? "编辑" : "配置"}
+          </button>
+        )}
+      </div>
+      <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "0 0 4px 0" }}>
+        {description}
+      </p>
+      {!editing && status === "set" && (
+        <p style={{ fontSize: 12, color: "var(--text-secondary, #aaa)", fontFamily: "monospace", margin: 0 }}>
+          {masked}
+        </p>
+      )}
+      {editing && (
+        <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="password"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            placeholder={placeholder}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            style={{
+              flex: 1,
+              padding: "6px 10px",
+              fontSize: 12,
+              borderRadius: 6,
+              border: "1px solid var(--border, #333)",
+              background: "var(--bg-root, #111)",
+              color: "var(--text, #eee)",
+              outline: "none",
+            }}
+          />
+          <button
+            onClick={handleSave}
+            disabled={!inputValue.trim() || saving}
+            style={{
+              padding: "6px 12px",
+              fontSize: 11,
+              borderRadius: 6,
+              border: "none",
+              background: "var(--accent, #818cf8)",
+              color: "white",
+              cursor: inputValue.trim() ? "pointer" : "not-allowed",
+              opacity: inputValue.trim() ? 1 : 0.5,
+            }}
+          >
+            {saving ? "保存中…" : "保存"}
+          </button>
+          {status === "set" && (
+            <button
+              onClick={handleDelete}
+              style={{
+                padding: "6px 12px",
+                fontSize: 11,
+                borderRadius: 6,
+                border: "1px solid rgba(248,113,113,0.3)",
+                background: "transparent",
+                color: "#f87171",
+                cursor: "pointer",
+              }}
+            >
+              删除
+            </button>
+          )}
+          <button
+            onClick={() => { setEditing(false); setInputValue(""); setError(null); }}
+            style={{
+              padding: "6px 12px",
+              fontSize: 11,
+              borderRadius: 6,
+              border: "1px solid var(--border, #333)",
+              background: "transparent",
+              color: "var(--text-secondary, #aaa)",
+              cursor: "pointer",
+            }}
+          >
+            取消
+          </button>
+        </div>
+      )}
+      {error && (
+        <p style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>{error}</p>
+      )}
+    </div>
+  );
+}
+
+/** 脱敏显示密钥: 前 8 字符 + ... + 后 4 字符 */
+function maskSecret(secret: string): string {
+  if (!secret) return "";
+  if (secret.length <= 16) return "••••••••";
+  return secret.slice(0, 8) + "..." + secret.slice(-4);
+}
+
+// ============================================================
+// 其他步骤组件
+// ============================================================
 
 function ASRStep({
   config,
@@ -195,30 +469,15 @@ function ASRStep({
       {config.asr.backend === "volcengine" && (
         <>
           <Input
-            label="火山引擎 Token（存储在 OS 密钥链）"
-            type="password"
-            value={config.asr.volcengine?.token_keyring_id ?? ""}
-            placeholder="密钥链 ID（如 myriad-mind/volcengine-token）"
-            onChange={(e) =>
-              update("asr", {
-                ...config.asr,
-                volcengine: {
-                  token_keyring_id: e.target.value,
-                  appid: config.asr.volcengine?.appid ?? "",
-                },
-              })
-            }
-          />
-          <Input
-            label="App ID"
+            label="火山引擎 App ID"
             value={config.asr.volcengine?.appid ?? ""}
             placeholder="火山引擎控制台→语音技术→应用ID"
+            hint="Token 请在「API 密钥」步骤中配置，存储在 OS 密钥链"
             onChange={(e) =>
               update("asr", {
                 ...config.asr,
                 volcengine: {
-                  token_keyring_id:
-                    config.asr.volcengine?.token_keyring_id ?? "",
+                  token_keyring_id: "volcengine-token",
                   appid: e.target.value,
                 },
               })
@@ -259,7 +518,8 @@ function VideoStep({
         }
       />
       <p className="text-xs text-gray-400">
-        抖音 / 小红书 / B 站视频解析需要 API Key。YouTube 不需要。API Key 一律存储在 OS 密钥链，不明文保存。
+        抖音 / 小红书 / B 站视频解析需要 API Key（已在「API 密钥」步骤配置）。
+        YouTube 不需要额外 Key。
       </p>
     </div>
   );

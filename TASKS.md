@@ -12,19 +12,19 @@
 - [x] 配置页签中增加"Python 路径"字段（类似 `FW_PYTHON` 环境变量）
 - [x] 用户可手动指定路径（如安装了 faster-whisper 的 venv Python）
 - [x] 留空 = 自动探测系统 Python（PATH 扫描）
-- [ ] Rust `deps.rs` 读取配置中的 Python 路径，校验版本 >= 3.9
-- [ ] 探测失败时在配置页签显示警告
+- [x] Rust `deps.rs` 读取配置中的 Python 路径，校验版本 >= 3.9
+- [x] 探测失败时在配置页签显示警告
 
 ### 1.1 接入 Python 脚本
-- [ ] 将 `D:/Project/MyClaude/myriad-mind/scripts/` 作为 git submodule 引入到 `scripts/`
-- [ ] 验证 6 个脚本可被 Rust `Command::new` 调用
-- [ ] 实现 `install_faster_whisper.py` 的 venv 自动创建逻辑
+- [x] 将 `D:/Project/MyClaude/myriad-mind/scripts/` 复制到 `scripts/`（上游无独立 repo，用复制+同步说明）
+- [x] 验证 6 个脚本可被 Rust `Command::new` 调用
+- [x] 实现 `install_faster_whisper.py` 的 venv 自动创建逻辑
 
 ### 1.2 前端对接 Rust 后端
 - [x] `api.ts` 封装所有 Tauri invoke() 调用（类型安全 + 浏览器降级）
 - [x] App.tsx 启动时从 Rust 读取配置，首启自动跳转配置页
 - [x] SSE 事件监听 `listen("claude-stream-delta")` 封装
-- [ ] 进度条对接真实的 `PipelineProgress` 事件（依赖 1.3）
+- [x] 进度条对接真实的 `PipelineProgress` 事件
 
 ### 1.3 管线编排实现
 - [x] Rust `pipeline.rs` 实现 `execute_pipeline()` 主函数
@@ -52,7 +52,7 @@
 - [x] 首次启动检测 — 无配置标记时默认显示配置页签
 - [x] 已配置时默认显示炼化页签
 - [x] 配置变更保存到 localStorage（后续对接 Rust config.json）
-- [ ] 敏感字段（API Key）仅显示脱敏形式（`sk-ant-...xxxx`），编辑时写入 OS 密钥链
+- [x] 敏感字段（API Key）仅显示脱敏形式（`sk-ant-...xxxx`），编辑时写入 OS 密钥链
 
 ### 2.3 配置存储层
 - [x] Windows：配置读写到 `%APPDATA%/myriad-mind/config.json`
@@ -62,10 +62,10 @@
 - [x] ~~移动端配置存储~~ → v2
 
 ### 2.4 API Key 管理
-- [ ] Claude API Key — 从密钥链读取，前端只显示 `sk-ant-...xxxx`
-- [ ] AI Douyin API Key — 同上
-- [ ] TikHub Token — 同上
-- [ ] 火山引擎 VC Token — 同上
+- [x] Claude API Key — 从密钥链读取，前端只显示 `sk-ant-...xxxx`
+- [x] AI Douyin API Key — 同上
+- [x] TikHub Token — 同上
+- [x] 火山引擎 VC Token — 同上
 
 ---
 
@@ -174,8 +174,8 @@
 | Desktop 前端页面 | ✅ 完成 | 2026-05-31 |
 | Desktop Rust 后端 | ✅ 完成 | 2026-05-31 |
 | CC Switch 暗色风格重构 | ✅ 完成 | 2026-05-31 |
-| 一、管道打通 | 🚧 进行中 | — |
-| 二、安全与配置 | 🚧 进行中 | — |
+| 一、管道打通 | ✅ 完成 | 2026-05-31 |
+| 二、安全与配置 | ✅ 完成 | 2026-05-31 |
 | 三、桌面端功能完善 | ⏳ 待开始 | — |
 | 四、移动端功能完善 | 🔒 v2 | — |
 | 五、构建与分发 | 🔒 v2 | — |
@@ -186,7 +186,7 @@
 ## 当前里程碑
 
 ```
-Windows v1.0 ─── 一、管道打通 ─── 二、安全配置 ─── 三、功能完善 ─── ✗  ← 你在这里
-                                                                          │
+Windows v1.0 ─── 一、管道打通 ✅ ─── 二、安全配置 ✅ ─── 三、功能完善 ─── ✗  ← 你在这里
+                                                                             │
 v2 ─── 移动端 ─── macOS/Linux ─── 构建分发 ─── 测试文档 ──────────────── ✗
 ```
