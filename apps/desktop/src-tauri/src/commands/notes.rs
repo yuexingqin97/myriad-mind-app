@@ -70,21 +70,26 @@ pub fn save_note(
     let is_new = version == 1;
     let fingerprint = simple_hash(source_input);
 
-    // 提取旧内容中的用户数据（更新记录 + 问答记录），丢弃旧元信息块
-    let old_updates = if !is_new { extract_section(&old_content, "## 更新记录") } else { String::new() };
-    let old_qa = extract_section(&old_content, "## 问答记录");
+    // 提取旧内容中的用户数据
+    let old_qa = extract_qa_section(&old_content);
+    let old_update_rows = if !is_new { extract_update_rows(&old_content) } else { String::new() };
 
-    // 构建版本记录
-    let update_entry = if is_new {
-        format!("### v1 · {} · 初次炼化\n\n**来源：** {source_input}\n\n**本次内容：**\n- 初次生成结构化笔记。\n", timestamp_now())
+    // 构建更新记录表格行
+    let now = timestamp_now();
+    let new_row = if is_new {
+        format!("| {now} | 初次炼化 · 来源: {source_input} |")
     } else {
-        let prev = if old_updates.is_empty() { String::new() } else { format!("{old_updates}\n\n") };
-        format!("{prev}### v{version} · {} · 重新炼化\n\n**来源：** {source_input}\n\n**变化：**\n- 基于同一输入重新炼化。\n", timestamp_now())
+        format!("| {now} | 重新炼化 · 来源: {source_input} |")
+    };
+    let update_rows = if old_update_rows.is_empty() {
+        format!("| 更新时间 | 更新内容 |\n|----------|----------|\n{new_row}")
+    } else {
+        format!("| 更新时间 | 更新内容 |\n|----------|----------|\n{old_update_rows}\n{new_row}")
     };
 
     // 构建调试信息
     let debug_section = if debug_metadata {
-        format!("\n\n---\n\n## 调试信息\n\n> 以下信息用于排查处理链路。普通阅读可忽略。\n\n| 项目 | 值 |\n|------|----|\n| App 版本 | 0.1.0-alpha.1 |\n| AI Provider | deepseek |\n| AI Model | deepseek-v4-pro |\n| 输出分类 | {category} |\n| 输入类型 | {source_type} |\n| Fingerprint | {fingerprint} |\n| 输出目录 | {base_dir} |\n")
+        format!("\n### 调试信息\n\n> 以下信息用于排查处理链路。\n\n| 项目 | 值 |\n|------|----|\n| App 版本 | 0.1.0-alpha.1 |\n| AI Provider | deepseek |\n| AI Model | deepseek-v4-pro |\n| 输出分类 | {category} |\n| 输入类型 | {source_type} |\n| Fingerprint | {fingerprint} |\n| 输出目录 | {base_dir} |\n")
     } else {
         String::new()
     };
@@ -94,19 +99,18 @@ pub fn save_note(
         &title, &category, version, source_type, source_input, &fingerprint,
     );
 
-    // 组装最终内容: 正文 + 更新记录 + 问答记录 + 调试信息 + 元信息
+    // 组装最终内容: 正文 + ## 大衍决心得(更新记录 + 问答 + 调试 + 元信息)
     let mut final_content = ai_output.to_string();
+    final_content.push_str("\n\n---\n\n## 大衍决心得\n\n### 更新记录\n\n");
+    final_content.push_str(&update_rows);
 
-    if !update_entry.is_empty() {
-        final_content.push_str(&format!("\n\n---\n\n## 更新记录\n\n{update_entry}"));
-    }
     if !old_qa.is_empty() {
-        final_content.push_str(&format!("\n\n---\n\n## 问答记录\n\n{old_qa}"));
+        final_content.push_str(&format!("\n\n### 问答记录\n\n{old_qa}"));
     }
     if !debug_section.is_empty() {
         final_content.push_str(&debug_section);
     }
-    final_content.push_str(&format!("\n\n---\n\n## 大衍决元信息\n\n> 以下为应用读取用元信息。手动编辑可能影响去重、追问和修为统计。\n\n{metadata_block}"));
+    final_content.push_str(&format!("\n\n### 元信息\n\n> 以下为应用读取用元信息。手动编辑可能影响去重、追问和修为统计。\n\n{metadata_block}"));
 
     std::fs::write(&note_path, &final_content)
         .map_err(|e| AppError::Config(format!("写入笔记失败: {e}")))?;
@@ -187,7 +191,6 @@ fn scan_categories(base_dir: &str) -> Vec<String> {
 }
 
 fn read_version(content: &str) -> u32 {
-    // Try metadata block first
     if let Some(block) = extract_metadata_block(content) {
         for line in block.lines() {
             if line.trim().starts_with("current_version:") {
@@ -195,24 +198,38 @@ fn read_version(content: &str) -> u32 {
             }
         }
     }
-    // Fallback: count ## 更新记录 entries
-    if let Some(updates) = content.find("## 更新记录") {
-        return content[updates..].matches("### v").count() as u32;
+    // Fallback: count update table rows
+    if let Some(section) = content.find("### 更新记录") {
+        let after = &content[section..];
+        return after.matches("| ").count().saturating_sub(2).max(1) as u32;
     }
     1
 }
 
-fn extract_section(content: &str, heading: &str) -> String {
-    if let Some(start) = content.find(heading) {
-        let after = &content[start + heading.len()..];
-        // Stop at next ## heading or metadata block
-        if let Some(end) = after.find("\n## ") {
+/// 提取旧笔记中的问答记录
+fn extract_qa_section(content: &str) -> String {
+    if let Some(start) = content.find("### 问答记录") {
+        let after = &content[start + "### 问答记录".len()..];
+        if let Some(end) = after.find("\n### ") {
             return after[..end].trim().to_string();
         }
         if let Some(end) = after.find("\n<!-- MYRIAD_MIND_METADATA") {
             return after[..end].trim().to_string();
         }
         return after.trim().to_string();
+    }
+    String::new()
+}
+
+/// 提取旧笔记更新记录表格中的数据行（去掉表头）
+fn extract_update_rows(content: &str) -> String {
+    if let Some(section) = content.find("### 更新记录") {
+        let after = &content[section + "### 更新记录".len()..];
+        // Find table rows: lines starting with |
+        let rows: Vec<&str> = after.lines()
+            .filter(|l| l.trim().starts_with('|') && !l.contains("---") && !l.contains("更新时间"))
+            .collect();
+        return rows.join("\n");
     }
     String::new()
 }
