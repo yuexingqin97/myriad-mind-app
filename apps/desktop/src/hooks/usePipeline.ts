@@ -126,6 +126,8 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
   const streamAccumRef = useRef("");
   const streamChunkRef = useRef(0);
   const pipelineCancelRef = useRef<(() => void) | null>(null);
+  const aiStartRef = useRef(0);
+  const lastUsageRef = useRef<{ inputTokens?: number; outputTokens?: number; totalTokens?: number }>({});
 
   // Cleanup on unmount
   useEffect(() => {
@@ -204,6 +206,8 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
       unlistenStream = api.listenMindStream((event) => {
         switch (event.type) {
           case "start":
+            aiStartRef.current = Date.now();
+            lastUsageRef.current = {};
             pushLog("step", `🤖 AI 开始生成 · ${event.model ?? ""}`);
             pushLog("divider", "");
             break;
@@ -223,20 +227,30 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
             // 思考过程单独累计，不进入正文
             break;
           case "usage":
-            pushLog("info", `📊 Token 消耗 · input: ${event.inputTokens ?? "?"} · output: ${event.outputTokens ?? "?"} · total: ${event.totalTokens ?? "?"}`);
+            lastUsageRef.current = {
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              totalTokens: event.totalTokens,
+            };
+            pushLog("info", `📊 Token · input: ${event.inputTokens ?? "?"}  output: ${event.outputTokens ?? "?"}  total: ${event.totalTokens ?? "?"}`);
             break;
-          case "done":
+          case "done": {
             // 推送剩余文本
             const remaining = streamAccumRef.current.slice(streamChunkRef.current);
             if (remaining) pushLog("output", remaining);
+            const elapsed = ((Date.now() - aiStartRef.current) / 1000).toFixed(1);
+            const u = lastUsageRef.current;
+            const summaryParts = [`共 ${streamAccumRef.current.length} 字符`, `⏱️ ${elapsed}s`];
+            if (u.totalTokens) summaryParts.push(`📊 ${(u.totalTokens / 1000).toFixed(1)}K tokens`);
             pushLog("divider", "");
-            pushLog("success", `✅ 笔记生成完成 · 共 ${streamAccumRef.current.length} 字符`);
+            pushLog("success", `✅ 笔记生成完成 · ${summaryParts.join(" · ")}`);
             streamAccumRef.current = "";
             streamChunkRef.current = 0;
             setStreamingText("");
             setProgress(100);
             finishPipeline();
             break;
+            }
           case "error":
             pushLog("error", `❌ ${event.message ?? "未知错误"}`);
             finishPipeline();

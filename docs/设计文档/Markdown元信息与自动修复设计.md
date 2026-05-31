@@ -22,6 +22,9 @@ Markdown 正文
 
 不再额外依赖 `metadata.json`。
 
+目录级索引另见：[输出目录知识库索引设计.md](./输出目录知识库索引设计.md)。  
+单篇 Markdown 末尾元信息是事实来源；输出目录下的 `.myriad-mind/` 是可重建的知识库索引缓存。
+
 好处：
 
 - 用户复制、移动、同步单个 `.md` 文件时不会丢元信息。
@@ -673,6 +676,16 @@ P1 再做 AI 合并正文：
 
 大量文件扫描时不要逐篇调用 DeepSeek。
 
+当输出目录存在 `.myriad-mind/` 时，修为面板优先读取目录索引：
+
+```text
+.myriad-mind/notes.jsonl
+.myriad-mind/categories.json
+.myriad-mind/fingerprints.json
+```
+
+如果索引缺失或过期，再回退扫描 Markdown，并根据每篇文末“大衍决元信息”重建索引。
+
 推荐策略：
 
 | 场景 | 行为 |
@@ -735,3 +748,4 @@ Model: deepseek-v4-flash
 - 用户指定合并到同一文件时，`sources[]` 追加来源，`current_version` 递增。
 - 追问模式在元信息缺失时先修复，再回答。
 - 修为面板可以从文件末尾元信息块快速读取标题、分类、标签、难度和阅读时长。
+- `.myriad-mind/` 索引可以从 Markdown 末尾元信息完整重建。
