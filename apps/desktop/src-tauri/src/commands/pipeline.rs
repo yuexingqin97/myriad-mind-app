@@ -1,8 +1,9 @@
 // ============================================================
 // 管线编排 — 多步骤管线执行器
-// 串联 Python 脚本 + Claude API，每步推送进度事件
+// 串联 Python 脚本 + MindEngine AI，每步推送进度事件
 // ============================================================
 
+use crate::commands::ai;
 use crate::commands::python::resolve_python_path;
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
@@ -188,7 +189,7 @@ async fn run_video_pipeline(
             Err(e) => {
                 emit_progress(app, "transcribe", &format!("转写失败: {e}"), 60.0, "failed",
                     Some("检查 Python + faster-whisper 是否安装"));
-                // 不中断: 后续 Claude 可以基于有限内容生成笔记
+                // 不中断: 后续 AI 可以基于有限内容生成笔记
             }
         }
     } else {
@@ -216,9 +217,9 @@ async fn run_video_pipeline(
     emit_progress(app, "generate_note", "AI 生成笔记", 75.0, "running", None);
     let text_path = temp_dir.join("text.txt");
     if text_path.exists() {
-        // TODO: 接入 Claude API 流式生成
+        // TODO: 接入 MindEngine 流式生成
         emit_progress(app, "generate_note", "笔记生成完成", 90.0, "completed",
-            Some("（待接入 Claude API Key）"));
+            Some("（待接入 DeepSeek API Key）"));
     } else {
         emit_progress(app, "generate_note", "无文本内容可分析", 90.0, "completed",
             Some("请先完成下载/转写步骤"));
@@ -255,9 +256,9 @@ async fn run_audio_pipeline(
     }
 
     emit_progress(app, "generate_note", "AI 生成笔记", 60.0, "running", None);
-    // TODO: Claude API
+    // TODO: MindEngine
     emit_progress(app, "generate_note", "笔记生成完成", 90.0, "completed",
-        Some("（待接入 Claude API Key）"));
+        Some("（待接入 DeepSeek API Key）"));
 
     Ok(())
 }
@@ -285,9 +286,35 @@ async fn run_text_pipeline(
     emit_progress(app, "read", &read_detail, 40.0, "completed", None);
 
     emit_progress(app, "generate_note", "AI 生成笔记", 50.0, "running", None);
-    // TODO: Claude API
-    emit_progress(app, "generate_note", "笔记生成完成", 90.0, "completed",
-        Some("（待接入 Claude API Key）"));
+
+    // 调用 MindEngine (DeepSeek V4 Pro)
+    match ai::generate_note(app, &text, "文本").await {
+        Ok(note) => {
+            // 保存笔记
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let note_filename = format!("note_{ts}.md");
+            let note_path = std::path::PathBuf::from(_note_dir).join(&note_filename);
+
+            if let Err(e) = std::fs::create_dir_all(std::path::PathBuf::from(_note_dir)) {
+                emit_progress(app, "save", &format!("创建目录失败: {e}"), 95.0, "failed", None);
+                return Err(AppError::Io(e));
+            }
+
+            std::fs::write(&note_path, &note)
+                .map_err(|e| AppError::Io(e))?;
+
+            emit_progress(app, "generate_note", "笔记生成完成", 95.0, "completed",
+                Some(&format!("已保存: {}", note_path.display())));
+        }
+        Err(e) => {
+            emit_progress(app, "generate_note", &format!("AI 生成失败: {e}"), 90.0, "failed",
+                Some(&e.to_string()));
+            return Err(e);
+        }
+    }
 
     Ok(())
 }

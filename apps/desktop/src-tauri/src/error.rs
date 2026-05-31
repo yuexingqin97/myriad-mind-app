@@ -32,8 +32,8 @@ pub enum AppError {
     #[error("JSON 错误: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("Claude API 错误: {code} — {message}")]
-    ClaudeApi { code: u16, message: String },
+    #[error("AI 错误: {message}")]
+    Ai { kind: String, message: String },
 
     #[error("流式响应中断: {0}")]
     StreamError(String),

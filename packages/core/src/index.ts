@@ -76,3 +76,25 @@ export {
   formatEstimateForUser,
   suggestReduction,
 } from "./estimator.js";
+
+// AI module
+export {
+  DEEPSEEK_MODELS,
+  findModel,
+  getModelsByProvider,
+  resolveModel,
+} from "./ai/index.js";
+export type {
+  AiProvider,
+  AiTask,
+  ModelInfo,
+  TaskComplexity,
+  TaskProfile,
+  ModelResolution,
+  MindStreamEvent,
+  MindRequest,
+  MindResponse,
+  AiConfig,
+  PromptHooks,
+  TaskOverlay,
+} from "./ai/index.js";

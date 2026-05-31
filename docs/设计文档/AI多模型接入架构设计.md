@@ -816,7 +816,7 @@ Base URL: https://api.deepseek.com
 
 ```text
 emit_progress(app, "generate_note", "AI 生成笔记", ...)
-// TODO: Claude API
+// TODO: MindEngine / DeepSeek
 ```
 
 后续改为：
@@ -933,4 +933,3 @@ run_code_pipeline
 - reasoning/content 分流
 
 等这条链路稳定，再扩展 Claude、OpenAI Compatible、Ollama，会更稳也更容易维护。
-

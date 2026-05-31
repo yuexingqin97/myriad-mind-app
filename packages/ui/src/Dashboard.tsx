@@ -338,7 +338,7 @@ function generateSuggestions(tags: Array<{ tag: string; count: number }>): strin
     suggestions.push("Rust async runtime 基础（tokio）");
   }
   if (tagNames.some((t) => t.includes("ai") || t.includes("claude") || t.includes("llm"))) {
-    suggestions.push("Claude API prompt caching 最佳实践");
+    suggestions.push("DeepSeek 1M 上下文利用策略");
     suggestions.push("AI Agent 工具调用模式设计");
   }
   if (tagNames.some((t) => t.includes("react") || t.includes("frontend"))) {

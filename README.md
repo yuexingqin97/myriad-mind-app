@@ -22,7 +22,7 @@
 ## 特点
 
 - **🔒 本地运行，无服务器** — 所有处理在你电脑上完成，数据完全由你控制
-- **🧠 AI 驱动** — 接入 Claude API 流式生成笔记，逐字展示生成过程
+- **🧠 AI 驱动** — v1 接入 DeepSeek V4 Pro / Flash，通过 `mind-stream` 流式生成笔记
 - **🛡️ 密钥安全** — API Key 存储在 OS 密钥链（Windows 凭据管理器 / macOS Keychain），绝不明文落盘
 - **📦 免费开源** — MIT License，不收费、不加广告、不做 SaaS
 - **🎨 修炼主题** — 修为面板、境界进度、成就系统，让学习有游戏感
@@ -32,8 +32,8 @@
 | 层 | 技术 |
 |----|------|
 | 桌面端 | Tauri 2.x (Rust + React 19 + TypeScript) |
-| 移动端 | React Native Expo (v2) |
-| AI | Claude API (Anthropic) |
+| 移动端 | React Native Expo (v2 延后) |
+| AI | DeepSeek V4 Pro（v1 主模型，1M 上下文）/ DeepSeek V4 Flash |
 | 视频处理 | Python + FFmpeg + yt-dlp + faster-whisper |
 | 存储 | 纯 Markdown + SQLite FTS5 搜索索引 |
 
@@ -65,7 +65,7 @@ cd apps/desktop
 pnpm tauri dev
 ```
 
-首次启动会显示配置向导，引导你配置 Python 路径、安装 faster-whisper、输入 Claude API Key。
+首次启动会显示配置向导，引导你配置 Python 路径、安装 faster-whisper、输入 DeepSeek API Key。
 
 ## 文档
 
@@ -74,7 +74,7 @@ pnpm tauri dev
 | [项目结构](docs/项目结构.md) | Monorepo 目录结构、各包职责、模块依赖关系 |
 | [架构设计](docs/架构设计.md) | 完整技术架构（Rust 模块树、数据流、API 设计） |
 | [需求与排期](docs/需求与排期.md) | 功能需求、任务拆解、时间评估 |
-| [法律风险分析](docs/法律风险分析.md) | 法律风险评估 + 免责模板 |
+| [法律风险分析](docs/参考资料/法律风险分析.md) | 法律风险评估 + 免责模板 |
 | [开发任务清单](docs/项目管理/开发任务清单.md) | 当前开发进度跟踪 |
 
 ## 许可证

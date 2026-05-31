@@ -33,8 +33,10 @@ export interface SettingsPageProps {
   theme?: ThemeMode;
   /** 主题切换回调 */
   onThemeChange?: (theme: ThemeMode) => void;
-  /** App 图标 URL（关于页显示） */
+  /** App 图标 URL */
   appIcon?: string;
+  /** 测试 AI 连接回调 */
+  onTestAiConnection?: () => Promise<string>;
 }
 
 export interface KeychainApi {
@@ -71,6 +73,7 @@ export function SettingsPage({
   theme,
   onThemeChange,
   appIcon,
+  onTestAiConnection,
 }: SettingsPageProps) {
   const [tab, setTab] = useState<TabId>("overview");
   const [config, setConfig] = useState<MyriadMindConfig>({ ...initialConfig });
@@ -92,9 +95,9 @@ export function SettingsPage({
   const healthItems = React.useMemo(() => {
     const items: Array<{ label: string; icon: string; status: HealthStatus; detail: string }> = [];
 
-    // Claude Key — derived from keychain async, use a simple sync indicator
+    // AI Key — check if any AI provider key is configured
     items.push({
-      label: "Claude", icon: "🧠",
+      label: "AI 模型", icon: "🧠",
       status: keychain ? "ok" : "unconfigured",
       detail: keychain ? "已连接密钥链" : "开发模式",
     });
@@ -161,7 +164,7 @@ export function SettingsPage({
           {allOk
             ? "✅ 全部核心能力已就绪，可处理文章、视频和本地文件。"
             : hasError
-              ? "❌ 核心能力缺失 — 还缺 Claude API Key 或 Python，暂时无法生成笔记。"
+              ? "❌ 核心能力缺失 — 还缺 AI API Key 或 Python，暂时无法生成笔记。"
               : "⚠️ 部分能力可用 — 文章处理可用，视频处理可能受限。"}
         </div>
       </div>
@@ -184,7 +187,7 @@ export function SettingsPage({
 
         {/* 右侧内容 */}
         <div className="settings-content-right">
-          {tab === "overview" && <OverviewTab config={config} healthItems={healthItems} allOk={allOk} hasError={hasError} configPath={configPath} onRecheckDeps={onRecheckDeps} onOpenWizard={onOpenWizard} onResetConfig={onResetConfig} theme={theme} onThemeChange={onThemeChange} />}
+          {tab === "overview" && <OverviewTab config={config} healthItems={healthItems} allOk={allOk} hasError={hasError} configPath={configPath} onRecheckDeps={onRecheckDeps} onOpenWizard={onOpenWizard} onResetConfig={onResetConfig} theme={theme} onThemeChange={onThemeChange} onTestAiConnection={onTestAiConnection} />}
           {tab === "keys" && <KeysTab keychain={keychain} />}
           {tab === "processing" && <ProcessingTab config={config} update={update} deps={deps} />}
           {tab === "output" && <OutputTab config={config} update={update} onSelectDir={onSelectOutputDir} onOpenDir={onOpenOutputDir} />}
@@ -232,7 +235,7 @@ function SettingsSection({ title, children }: { title: string; children: React.R
 // ============================================================
 
 function OverviewTab({
-  config, healthItems, allOk, hasError, configPath, onRecheckDeps, onOpenWizard, onResetConfig, theme, onThemeChange,
+  config, healthItems, allOk, hasError, configPath, onRecheckDeps, onOpenWizard, onResetConfig, theme, onThemeChange, onTestAiConnection,
 }: {
   config: MyriadMindConfig;
   healthItems: Array<{ label: string; icon: string; status: HealthStatus; detail: string }>;
@@ -243,7 +246,24 @@ function OverviewTab({
   onResetConfig?: () => void;
   theme?: ThemeMode;
   onThemeChange?: (theme: ThemeMode) => void;
+  onTestAiConnection?: () => Promise<string>;
 }) {
+  const [aiTestResult, setAiTestResult] = useState<string | null>(null);
+  const [aiTesting, setAiTesting] = useState(false);
+
+  const handleTestConnection = async () => {
+    if (!onTestAiConnection) return;
+    setAiTesting(true);
+    setAiTestResult(null);
+    try {
+      const result = await onTestAiConnection();
+      setAiTestResult(`✅ ${result}`);
+    } catch (e) {
+      setAiTestResult(`❌ ${e}`);
+    } finally {
+      setAiTesting(false);
+    }
+  };
   return (
     <>
       <SettingsSection title="外观主题">
@@ -300,7 +320,17 @@ function OverviewTab({
           {onResetConfig && (
             <Button variant="secondary" onClick={onResetConfig}>🔄 重置配置</Button>
           )}
+          {onTestAiConnection && (
+            <Button variant="secondary" onClick={handleTestConnection} disabled={aiTesting}>
+              {aiTesting ? "⏳ 测试中…" : "🧪 测试 AI 连接"}
+            </Button>
+          )}
         </div>
+        {aiTestResult && (
+          <p style={{ fontSize: 12, marginTop: 8, color: aiTestResult.startsWith("✅") ? "#4ade80" : "#f87171" }}>
+            {aiTestResult}
+          </p>
+        )}
       </SettingsSection>
     </>
   );
@@ -311,17 +341,18 @@ function OverviewTab({
 // ============================================================
 
 const KEY_DEFS: Array<{ service: string; label: string; desc: string; placeholder: string; required: boolean }> = [
-  { service: "claude-api-key",  label: "Claude API Key",      desc: "Anthropic 控制台 → API Keys。格式: sk-ant-api03-...",  placeholder: "sk-ant-api03-...", required: true },
+  { service: "claude-api-key",  label: "Claude API Key（可选）", desc: "Anthropic 控制台 → API Keys。v2 备用，当前主力为 DeepSeek", placeholder: "sk-ant-api03-...", required: false },
   { service: "ai-douyin-api-key", label: "AI Douyin API Key", desc: "抖音/B 站/小红书视频解析。aidouyin.com 注册获取",        placeholder: "输入 Key...",       required: false },
   { service: "tikhub-token",     label: "TikHub Token",       desc: "视频解析备用方案。tikhub.io 注册获取",                    placeholder: "输入 Token...",     required: false },
   { service: "volcengine-token", label: "火山引擎 Token",     desc: "云端 ASR 后端 Token",                                     placeholder: "输入 Token...",     required: false },
+  { service: "deepseek-api-key",  label: "DeepSeek API Key",   desc: "AI 笔记生成主力模型。platform.deepseek.com → API Keys",      placeholder: "sk-...",            required: true },
 ];
 
 function KeysTab({ keychain }: { keychain?: KeychainApi }) {
   return (
     <SettingsSection title="API 密钥管理">
       <p style={{ fontSize: 12, color: "var(--text-muted, #666)", marginBottom: 16, lineHeight: 1.6 }}>
-        所有密钥存储在 OS 密钥链（Windows 凭据管理器），绝不明文落盘。Claude API Key 为必填项。
+        所有密钥存储在 OS 密钥链（Windows 凭据管理器），绝不明文落盘。DeepSeek API Key 为必填项。
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {KEY_DEFS.map((def) => (
@@ -705,7 +736,7 @@ function AboutTab({ appIcon }: { appIcon?: string }) {
           {[
             ["前端", "React 19 + TypeScript"],
             ["后端", "Rust (Tauri 2.x)"],
-            ["AI", "Claude API (Anthropic)"],
+            ["AI", "DeepSeek V4 (API)"],
             ["视频", "Python + FFmpeg + yt-dlp"],
             ["ASR", "faster-whisper"],
             ["存储", "Markdown + SQLite"],

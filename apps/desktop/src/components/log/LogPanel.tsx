@@ -35,7 +35,7 @@ const TYPE_PREFIX: Record<LogEntryType, string> = {
 
 interface LogPanelProps {
   entries: LogEntry[];
-  /** Live streaming text from Claude (appended after last entry) */
+  /** Live streaming text from AI (appended after last entry) */
   streamingText?: string;
 }
 

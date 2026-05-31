@@ -277,9 +277,9 @@ const KEY_DEFS: Array<{
   service: string; label: string; description: string; placeholder: string; required: boolean;
 }> = [
   {
-    service: "claude-api-key", label: "Claude API Key",
-    description: "Anthropic 控制台 → API Keys → Create Key。格式: sk-ant-api03-...",
-    placeholder: "sk-ant-api03-...", required: true,
+    service: "claude-api-key", label: "Claude API Key（可选）",
+    description: "Anthropic 控制台 → API Keys。v2 备用方案，当前主力为 DeepSeek V4 Pro",
+    placeholder: "sk-ant-api03-...", required: false,
   },
   {
     service: "ai-douyin-api-key", label: "AI Douyin API Key",
@@ -296,13 +296,18 @@ const KEY_DEFS: Array<{
     description: "云端 ASR 后端。火山引擎控制台 → 语音技术 → 获取 Token",
     placeholder: "输入火山引擎 Token...", required: false,
   },
+  {
+    service: "deepseek-api-key", label: "DeepSeek API Key",
+    description: "AI 笔记生成主力模型。platform.deepseek.com → API Keys",
+    placeholder: "sk-...", required: true,
+  },
 ];
 
 function ApiKeysStep({ keychain }: { keychain?: KeychainApi }) {
   return (
     <div>
       <p style={{ fontSize: 13, color: "var(--text-secondary, #a0a0c0)", marginBottom: 16, lineHeight: 1.6 }}>
-        所有密钥存储在 OS 密钥链（Windows 凭据管理器），绝不明文落盘。Claude API Key 为必填项，其余按需配置。
+        所有密钥存储在 OS 密钥链（Windows 凭据管理器），绝不明文落盘。DeepSeek API Key 为必填项，其余按需配置。
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {KEY_DEFS.map((def) => (

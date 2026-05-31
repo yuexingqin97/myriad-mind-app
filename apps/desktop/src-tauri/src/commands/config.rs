@@ -1,6 +1,6 @@
 // ============================================================
 // 配置命令 — 配置读写 + 首启检测 + OS 密钥链
-// Windows v1: %APPDATA%/myriad-mind/config.json
+// 配置目录: ~/.myriad-mind-app/ (所有平台统一)
 // ============================================================
 
 use crate::error::AppError;
@@ -9,28 +9,23 @@ use std::path::PathBuf;
 
 // ---- 路径 ----
 
-/// 配置目录: %APPDATA%/myriad-mind/
-fn config_dir() -> PathBuf {
-    if cfg!(target_os = "windows") {
-        std::env::var("APPDATA")
+/// 用户主目录
+fn home_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("USERPROFILE")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::var("USERPROFILE")
-                    .map(|h| PathBuf::from(h).join("AppData").join("Roaming"))
-                    .unwrap_or_else(|_| PathBuf::from("."))
-            })
-    } else {
-        // macOS/Linux fallback (v2)
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        if cfg!(target_os = "macos") {
-            PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-        } else {
-            PathBuf::from(home).join(".config")
-        }
+            .unwrap_or_else(|_| PathBuf::from("."))
     }
-    .join("myriad-mind")
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("HOME").unwrap_or_else(|_| ".".into()).into()
+    }
+}
+
+/// 配置目录: ~/.myriad-mind-app/
+pub fn config_dir() -> PathBuf {
+    home_dir().join(".myriad-mind-app")
 }
 
 /// 配置文件完整路径
@@ -198,10 +193,17 @@ pub async fn read_keychain_entry(
     }
 }
 
+/// 公开凭据读取接口 — 供 ai/engine.rs 等模块调用
+#[cfg(target_os = "windows")]
+pub fn cred_read(service: &str) -> Result<Option<String>, String> {
+    let target = format!("myriad-mind/{service}");
+    windows_cred::read(&target)
+}
+
 // ---- Windows Credential Manager ----
 //
 // 使用 Win32 CredReadW / CredWriteW API 读写 Windows 凭据管理器。
-// 条目命名: myriad-mind/{service}  (如 myriad-mind/claude-api-key)
+// 条目命名: myriad-mind/{service}  (如 myriad-mind/deepseek-api-key)
 
 #[cfg(target_os = "windows")]
 mod windows_cred {

@@ -388,7 +388,7 @@ App 开发重点：
 
 ## 4.7 AI 笔记生成模块
 
-Skill 中 Claude 负责：
+Skill 原型中由 Claude 负责：
 
 - 摘要。
 - 英译中。
@@ -901,7 +901,7 @@ P2：
 | 视频管线 | 完整规则 | Rust 管线雏形 | 下载和 AI 生成未打通 |
 | ASR | 脚本成熟 | 已封装部分脚本 | 结果结构化和缓存复用不足 |
 | 关键帧 | v2.1 smart | 旧 interval 配置 | 需重做为字幕引导 |
-| AI 生成 | Claude Skill | Claude TODO / DeepSeek 设计 | 需实现 MindEngine |
+| AI 生成 | Claude Skill 原型 | DeepSeek 设计已定，代码待接入 | 需实现 MindEngine |
 | 修为面板 | 完整规则 | mock UI | 需真实扫描 |
 | 搜索 | grep 原型 | 无 | 需新增 |
 | 对比 | prompt 原型 | core 有 compare prompt | 需 UI / 管线 |

@@ -68,7 +68,7 @@ async function runMockPipeline(
     if (step.label === "AI 分析生成") {
       pushLog("info", "  → ASR 转写完成, 关键帧提取完成");
       pushLog("divider", "");
-      pushLog("info", "  → 开始 Claude API 流式生成 …");
+      pushLog("info", "  → 开始 AI 流式生成 …");
 
       const mockOutput = [
         "# 学习笔记\n\n",
@@ -190,20 +190,34 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
         }
       });
 
-      // Listen for Claude SSE stream
-      const unlistenStream = api.listenClaudeStream(
-        (delta) => {
-          streamAccumRef.current += delta;
-          setStreamingText(streamAccumRef.current);
-        },
-        (_fullText: string) => {
-          if (streamAccumRef.current) {
-            pushLog("output", streamAccumRef.current);
-          }
-          streamAccumRef.current = "";
-          setStreamingText("");
-        },
-      );
+      // Listen for mind-stream (DeepSeek unified events)
+      const unlistenStream = api.listenMindStream((event) => {
+        switch (event.type) {
+          case "start":
+            pushLog("step", `🤖 ${event.provider ?? "AI"} · ${event.model ?? ""}`);
+            break;
+          case "delta":
+            streamAccumRef.current += (event.delta ?? "");
+            setStreamingText(streamAccumRef.current);
+            break;
+          case "reasoning_delta":
+            // 思考过程单独累计，不进入正文
+            break;
+          case "usage":
+            pushLog("info", `📊 tokens: ${event.totalTokens ?? "?"} (input: ${event.inputTokens ?? "?"}, output: ${event.outputTokens ?? "?"})`);
+            break;
+          case "done":
+            if (streamAccumRef.current) {
+              pushLog("output", streamAccumRef.current);
+            }
+            streamAccumRef.current = "";
+            setStreamingText("");
+            break;
+          case "error":
+            pushLog("error", `❌ ${event.message ?? "未知错误"}`);
+            break;
+        }
+      });
 
       pipelineCancelRef.current = () => {
         unlisten();

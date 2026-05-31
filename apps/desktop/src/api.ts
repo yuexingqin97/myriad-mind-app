@@ -224,45 +224,56 @@ export async function checkKeychainEntry(service: string, account: string): Prom
   return { exists: !!localStorage.getItem(`keyring/${service}`) };
 }
 
-// ---- Claude API (SSE 流式) ----
 
-export interface ClaudeMessage {
-  role: string;
-  content: string;
+export interface MindStreamEvent {
+  type: "start" | "reasoning_delta" | "delta" | "usage" | "done" | "error";
+  provider?: string;
+  model?: string;
+  delta?: string;
+  text?: string;
+  finishReason?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  code?: string;
+  message?: string;
+  retryable?: boolean;
 }
 
-export function listenClaudeStream(
-  onDelta: (delta: string) => void,
-  onDone: (fullText: string) => void,
+export function listenMindStream(
+  onEvent: (event: MindStreamEvent) => void,
 ): () => void {
   let cancelled = false;
-
   ensureTauri().then((ok) => {
     if (!ok || cancelled) return;
-    // 注册 SSE 事件监听
-    tauriListen!("claude-stream-delta", (event: unknown) => {
+    tauriListen!("mind-stream", (event: unknown) => {
       if (cancelled) return;
-      const payload = event as { delta: string };
-      onDelta(payload.delta);
+      onEvent(event as MindStreamEvent);
     });
   });
-
   return () => { cancelled = true; };
 }
 
-export async function streamNoteGeneration(
-  messages: ClaudeMessage[],
-  systemPrompt: string,
-  apiKey: string,
-): Promise<string> {
-  if (await ensureTauri()) {
-    return tauriInvoke!("stream_note_generation", {
-      messages,
-      systemPrompt,
-      apiKey,
-    }) as Promise<string>;
-  }
-  // Mock: simulate delay
+// ---- AI Tasks ----
+
+export interface MindRequestPayload {
+  task: string;
+  messages: Array<{ role: string; content: string }>;
+  system_prompt: string;
+  model_override?: string;
+  stream: boolean;
+  max_tokens?: number;
+  thinking?: { enabled: boolean; effort: "high" | "max" };
+}
+
+export async function runMindTask(request: MindRequestPayload): Promise<unknown> {
+  if (await ensureTauri()) return tauriInvoke!("run_mind_task", { request }) as Promise<unknown>;
   await new Promise((r) => setTimeout(r, 2000));
-  return "模拟生成结果 — 请在 Tauri 环境下运行以体验完整功能";
+  return { text: "# 模拟生成\n\n请在 Tauri 环境下运行。", provider: "deepseek", model: "mock" };
+}
+
+export async function testDeepSeekConnection(): Promise<string> {
+  if (await ensureTauri()) return tauriInvoke!("test_deepseek_connection") as Promise<string>;
+  return "pong — deepseek-v4-flash (browser mock)";
 }

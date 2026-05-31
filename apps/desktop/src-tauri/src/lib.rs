@@ -6,7 +6,7 @@ mod commands;
 mod error;
 
 use commands::{
-    claude::{call_claude, stream_note_generation},
+    ai::{run_mind_task, test_deepseek_connection},
     config::{
         check_keychain_entry, get_config_info, is_first_launch, read_config,
         read_keychain_entry, reset_config, store_keychain_entry, write_config,
@@ -64,9 +64,6 @@ pub fn run() {
             install_faster_whisper,
             list_ai_douyin_tasks,
             check_python_env,
-            // Claude API
-            stream_note_generation,
-            call_claude,
             // 文件系统
             scan_directory,
             read_text_file,
@@ -75,6 +72,9 @@ pub fn run() {
             copy_asset,
             // 管线编排
             execute_pipeline,
+            // AI (DeepSeek)
+            run_mind_task,
+            test_deepseek_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

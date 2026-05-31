@@ -1,5 +1,8 @@
 # 任务：搭建大衍决 App monorepo 脚手架
 
+> 历史脚手架提示，已不作为当前排期或架构依据。
+> 当前请以 `docs/架构设计.md` 和 `docs/需求与排期.md` 为准。
+
 ## 上下文
 - 项目: myriad-mind-app (独立跨平台桌面+移动App)
 - 位置: D:/Project/myriad-mind-app/

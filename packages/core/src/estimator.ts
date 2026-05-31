@@ -113,7 +113,7 @@ export function estimateCost(
     factors.push(`批量处理 ×${options.fileCount}`);
   }
 
-  // ---- 成本计算 (Claude Sonnet 4.6 定价) ----
+  // ---- 成本计算 (DeepSeek V4 定价参考) ----
   // $3/M 输入 tokens, $15/M 输出 tokens
   const totalCost =
     (inputTokens / 1_000_000) * 3 + (outputTokens / 1_000_000) * 15;

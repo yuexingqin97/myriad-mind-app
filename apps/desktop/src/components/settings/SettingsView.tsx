@@ -90,6 +90,7 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard }: Se
             theme={theme}
             onThemeChange={setTheme}
             appIcon={appIcon}
+            onTestAiConnection={async () => api.testDeepSeekConnection()}
           />
         </>
       )}
