@@ -162,36 +162,44 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
 
     if (await isTauri()) {
       // ---- Tauri real pipeline ----
+      let pipelineDone = false;
+      let unlistenStream: () => void = () => {};
+
+      const finishPipeline = () => {
+        if (pipelineDone) return;
+        pipelineDone = true;
+        setProcessing(false);
+        unlisten();
+        unlistenStream();
+        pipelineCancelRef.current = null;
+      };
+
       const unlisten = api.listenPipelineProgress((event) => {
-        setProgress(Math.round(event.percent));
+        const pct = Math.round(event.percent);
+        setProgress(isNaN(pct) ? 0 : pct);
         setStatus(event.label);
         if (event.detail) setProgressDetail(event.detail);
 
         if (event.status === "running") {
           pushLog("step", event.label);
         }
-        if (event.detail) {
+        if (event.detail && event.status !== "failed") {
           pushLog("info", event.detail);
         }
 
-        if (event.status === "completed" && event.step === "completed") {
-          pushLog("divider", "");
-          pushLog("success", `✅ 炼化完成 — ${event.label}`);
-          setProcessing(false);
-          unlisten();
-          pipelineCancelRef.current = null;
+        // Completion: any step with status "completed" and high progress
+        if (event.status === "completed" && event.percent >= 90) {
+          finishPipeline();
         }
         if (event.status === "failed") {
           pushLog("error", `❌ ${event.label}`);
-          setProcessing(false);
           setProgressDetail(`❌ ${event.label}`);
-          unlisten();
-          pipelineCancelRef.current = null;
+          finishPipeline();
         }
       });
 
       // Listen for mind-stream (DeepSeek unified events)
-      const unlistenStream = api.listenMindStream((event) => {
+      unlistenStream = api.listenMindStream((event) => {
         switch (event.type) {
           case "start":
             pushLog("step", `🤖 ${event.provider ?? "AI"} · ${event.model ?? ""}`);
@@ -212,9 +220,13 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
             }
             streamAccumRef.current = "";
             setStreamingText("");
+            pushLog("success", "✅ 笔记生成完成");
+            setProgress(100);
+            finishPipeline();
             break;
           case "error":
             pushLog("error", `❌ ${event.message ?? "未知错误"}`);
+            finishPipeline();
             break;
         }
       });
