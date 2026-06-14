@@ -1,5 +1,6 @@
 pub mod deepseek;
 pub mod engine;
+pub mod prompt_manager;
 pub mod types;
 pub mod vision;
 

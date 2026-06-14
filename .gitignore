@@ -36,7 +36,9 @@ Thumbs.db
 .env.*.local
 
 # Config with secrets
+config.json
 myriad-mind-config.json
+!config.example.json
 !myriad-mind-config.example.json
 
 # Python

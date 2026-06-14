@@ -35,7 +35,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../../../scripts/*.py"
+      "../../../scripts/*.py",
+      "prompts/**/*.md"
     ]
   }
 }

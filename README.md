@@ -15,14 +15,14 @@
 | B 站 / YouTube / 抖音 / 小红书视频链接 | 视频内容笔记 + 关键帧截图 + ASR 转写 |
 | 知乎 / CSDN / 掘金 / 任意网页 URL | 文章精华笔记 + 知识图谱 |
 | 本地视频 / 音频 / Markdown / 纯文本 | 内容分析笔记 |
-| GitHub 仓库 / 本地代码目录 | 架构分析笔记 + 代码阅读指南 |
+| 本地代码目录 | 架构分析笔记 + 代码阅读指南（GitHub clone 为后续能力） |
 
 **每篇笔记包含：** AI 摘要、Mermaid 流程图/架构图、术语表、扩展学习资源、阅读时长与难度评级。
 
 ## 特点
 
 - **🔒 本地运行，无服务器** — 所有处理在你电脑上完成，数据完全由你控制
-- **🧠 AI 驱动** — v1 接入 DeepSeek V4 Pro / Flash，通过 `mind-stream` 流式生成笔记
+- **🧠 AI 驱动** — 已接入 DeepSeek V4 Pro / Flash，通过 `mind-stream` 流式生成笔记
 - **🛡️ 密钥安全** — API Key 存储在 OS 密钥链（Windows 凭据管理器 / macOS Keychain），绝不明文落盘
 - **📦 免费开源** — MIT License，不收费、不加广告、不做 SaaS
 - **🎨 修炼主题** — 修为面板、境界进度、成就系统，让学习有游戏感
@@ -35,7 +35,7 @@
 | 移动端 | React Native Expo (v2 延后) |
 | AI | DeepSeek V4 Pro（v1 主模型，1M 上下文）/ DeepSeek V4 Flash |
 | 视频处理 | Python + FFmpeg + yt-dlp + faster-whisper |
-| 存储 | 纯 Markdown + SQLite FTS5 搜索索引 |
+| 存储 | 纯 Markdown + `.myriad-mind/` 知识库索引 |
 
 ## 快速开始
 
@@ -60,10 +60,15 @@ pnpm install
 ### 开发
 
 ```bash
-# 启动桌面端开发模式（热重载）
+# 推荐方式：在根目录启动桌面端开发模式（热重载）
+pnpm dev
+
+# 或在 apps/desktop 目录下启动
 cd apps/desktop
-pnpm tauri dev
+pnpm dev:desktop
 ```
+
+> 详细的启动方式与排错见 [开发启动指南](docs/开发启动指南.md)。
 
 首次启动会显示配置向导，引导你配置 Python 路径、安装 faster-whisper、输入 DeepSeek API Key。
 
@@ -76,6 +81,7 @@ pnpm tauri dev
 | [需求与排期](docs/需求与排期.md) | 功能需求、任务拆解、时间评估 |
 | [法律风险分析](docs/参考资料/法律风险分析.md) | 法律风险评估 + 免责模板 |
 | [开发任务清单](docs/项目管理/开发任务清单.md) | 当前开发进度跟踪 |
+| [开发启动指南](docs/开发启动指南.md) | 本地启动步骤、常用脚本与排错 |
 
 ## 许可证
 

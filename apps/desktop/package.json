@@ -5,10 +5,10 @@
   "description": "大衍决桌面端 — Tauri 2.x + React",
   "type": "module",
   "scripts": {
-    "run": "pnpm dev",
     "dev": "vite",
-    "dev:web": "vite",
+    "dev:desktop": "tauri dev",
     "build": "tsc && vite build",
+    "build:desktop": "tauri build",
     "preview": "vite preview",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",

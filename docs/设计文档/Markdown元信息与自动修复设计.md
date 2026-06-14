@@ -1,7 +1,7 @@
 # Markdown 元信息与自动修复设计
 
 > 参考来源：`D:\Project\MyClaude\myriad-mind` 验证版逻辑。  
-> 设计目标：一篇 Markdown 就是一篇完整笔记实体。机器可读元信息放在文件末尾的“大衍决元信息块”中；如果用户删除了元信息，或导入旧笔记没有元信息，App 可以先规则补全，再调用 DeepSeek 生成/修复元信息。
+> 设计目标：一篇 Markdown 就是一篇完整笔记实体。机器可读元信息放在文件末尾 `## 大衍决心得` 二级标题下的元信息子章节中（YAML 块，`MYRIAD_MIND_METADATA_START/END` 标记包裹）；如果用户删除了元信息，或导入旧笔记没有元信息，App 可以先规则补全，再调用 DeepSeek 生成/修复元信息。
 
 ---
 
@@ -40,7 +40,7 @@ Markdown 正文
 
 | 验证版逻辑 | App 版迁移方式 |
 |------------|----------------|
-| `NOTE_METADATA` 控制文末生成元信息 | App 固定在文件末尾输出机器可读“大衍决元信息块” |
+| `NOTE_METADATA` 控制文末生成元信息 | App 固定在文件末尾 `## 大衍决心得` 下输出机器可读元信息块 |
 | `DEBUG_METADATA=false` 默认不输出调试信息 | App 设置项 `debug_metadata` 关闭时不写可见调试信息 |
 | `DEBUG_METADATA=true` 时输出流水线耗时、工具调用、决策链路 | App 在文末追加 `## 调试信息`，仅面向开发/排错 |
 | 笔记里有“原始资源”字段 | 元信息块中保留 `sources[]` |
@@ -235,7 +235,7 @@ current_version: 2
 
 ### 5.1 基础元信息
 
-App 版把“机器必须读取”的元信息固定放在文件末尾的 `## 大衍决元信息` 章节，而不是文件开头。
+App 版把“机器必须读取”的元信息固定放在文件末尾的 `## 大衍决心得` 二级标题下的 `### 元信息` 子章节，而不是文件开头。
 
 这部分不受用户设置里的“显示调试元信息”影响：
 
@@ -253,7 +253,7 @@ App 版把“机器必须读取”的元信息固定放在文件末尾的 `## �
 
 原因：这些字段是去重、追问、增量更新、修为面板的基础。如果允许关闭，后续功能会不稳定。
 
-注意：`## 大衍决元信息` 不受 `debug_metadata` 开关影响，始终输出。`debug_metadata` 只控制 `## 调试信息`。
+注意：`## 大衍决心得` 下的 `### 元信息` 子章节不受 `debug_metadata` 开关影响，始终输出。`debug_metadata` 只控制 `## 调试信息`。
 
 ### 5.2 版本与模型记录
 
@@ -531,7 +531,7 @@ H1/H2 目录
 2. 读取 H1、文件名、父目录、更新记录。
 3. 规则生成最小元信息块。
 4. 调用 DeepSeek 补充语义字段。
-5. 在文档末尾重新插入 `## 大衍决元信息`。
+5. 在文档末尾重新插入 `## 大衍决心得` 下的 `### 元信息` 子章节（若整块缺失则先补 `## 大衍决心得` 二级标题）。
 ```
 
 追加更新记录：
@@ -544,7 +544,7 @@ H1/H2 目录
 
 ### 8.3 旧 Skill 笔记导入
 
-旧笔记可能没有大衍决元信息块，但正文里有：
+旧笔记可能没有 `## 大衍决心得` 元信息块，但正文里有：
 
 - 视频信息表。
 - 原始资源。
@@ -628,7 +628,7 @@ P1 再做 AI 合并正文：
 追问模式读取顺序：
 
 ```text
-1. 大衍决元信息块
+1. ## 大衍决心得 下的元信息块（YAML）
 2. 当前正文
 3. sources[] 原始资源
 4. assets transcript / keyframes
@@ -659,7 +659,7 @@ P1 再做 AI 合并正文：
 
 修为面板扫描 `.md` 时：
 
-1. 解析文件末尾的大衍决元信息块。
+1. 解析文件末尾 `## 大衍决心得` 下的元信息块（YAML）。
 2. 缺失则触发轻量修复。
 3. 读取：
    - `title`
@@ -684,7 +684,7 @@ P1 再做 AI 合并正文：
 .myriad-mind/fingerprints.json
 ```
 
-如果索引缺失或过期，再回退扫描 Markdown，并根据每篇文末“大衍决元信息”重建索引。
+如果索引缺失或过期，再回退扫描 Markdown，并根据每篇文末 `## 大衍决心得` 下的元信息块重建索引。
 
 推荐策略：
 
@@ -708,12 +708,10 @@ packages/core/src/notes/
 ├── debug-metadata.ts   # 调试信息渲染与追加
 └── slug.ts             # 目录安全名
 
-apps/desktop/src-tauri/src/commands/notes/
-├── read_note.rs
-├── write_note.rs
-├── repair_metadata.rs
-├── append_note_record.rs
-└── append_debug_trace.rs
+apps/desktop/src-tauri/src/commands/notes.rs   # 单文件（445 行）
+   # 含 read_note / write_note / repair_metadata /
+   #   append_note_record / append_debug_trace 全部逻辑
+   # 没有 notes/ 子目录
 ```
 
 DeepSeek 修复通过 MindEngine：
@@ -732,7 +730,7 @@ Model: deepseek-v4-flash
 
 ## 十三、验收标准
 
-- 新生成笔记末尾包含 `myriad-mind-note/v1` 大衍决元信息块。
+- 新生成笔记末尾包含 `myriad-mind-note/v1` 元信息块（位于 `## 大衍决心得` 二级标题下）。
 - 元信息不再写入单独 `metadata.json`。
 - 设置关闭 `debug_metadata` 时，新笔记文末不出现 `## 调试信息`。
 - 设置开启 `debug_metadata` 时，新笔记文末出现规范化 `## 调试信息`。

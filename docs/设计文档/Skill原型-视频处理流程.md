@@ -402,15 +402,15 @@ fi
 | 步骤 | Skill 能力 | App 当前状态 |
 |------|-----------|-------------|
 | 0.7 | 灵力预估 + 确认阈值 | ✅ 已实现 `estimateCost()` |
-| 4.5 | **字幕分析 → 推荐截图时间点** | ❌ 未实现 — Claude 分析字幕推荐时间点 |
-| 4.7 | **guided + scene + gap 三级截图** | ⚠️ App 只有基本 `extract_keyframes.py` 调用 |
+| 4.5 | **字幕分析 → 推荐截图时间点** | ✅ 已实现 — `ai/vision.rs:analyze_subtitle`，`pipeline.rs:606` 调用 |
+| 4.7 | **guided + scene + gap 三级截图** | ✅ 已实现 — `pipeline.rs:extract_keyframes_guided`（`:654/2107`），传入 guided timestamps |
 | 7.0 | **时间戳可点击链接（平台特定）** | ❌ 未实现 — 笔记生成逻辑在 AI prompt 中，非代码层 |
-| 7.1 | **截图审查三阶段** | ❌ 未实现 — App 无法做视觉审查 |
+| 7.1 | **截图审查三阶段** | ✅ 已实现 — `ai/vision.rs:review_keyframes`（DeepSeek Vision 视觉审查），`pipeline.rs:697` 调用 |
 | 7.2 | **评论区精华提取** | ❌ 未实现 — 需要 B 站 API + YouTube yt-dlp |
 | 7.3 | **知识关系图（Mermaid）** | ⚠️ 依赖 AI prompt 生成，非代码 |
-| 7.4 | **教程操作模式自动检测** | ❌ 未实现 |
+| 7.4 | **教程操作模式自动检测** | ✅ 已实现 — `ai/vision.rs:detect_tutorial_mode`，`pipeline.rs:766` 调用 |
 | 6 | **语言检测与翻译** | ❌ 未实现 |
 | 步骤 7 | **可靠性评级** + **版本差异标注** | ❌ 未实现 |
 | 步骤 9 | 修为面板 / 学习路线推荐 | ❌ 未实现 |
 
-核心差异：Skill 原型靠 Claude 的推理能力 + 多模态视觉做截图审查/字幕分析，App 需要找到可替代方案。
+核心差异：Skill 原型靠 Claude 的推理能力 + 多模态视觉做截图审查/字幕分析，App 已用 DeepSeek Vision 视觉模式替代（见 [DeepSeek视觉-截图审查方案](./DeepSeek视觉-截图审查方案.md)），字幕分析/guided 截图/截图审查/教程检测均已上线；评论区精华、自动翻译、修为面板仍待开发。

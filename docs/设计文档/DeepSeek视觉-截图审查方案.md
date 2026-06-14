@@ -250,7 +250,7 @@ execute_pipeline
     → save_note
 ```
 
-### 4.2 改造后管线
+### 4.2 改造后管线（已落地）
 
 ```
 execute_pipeline
@@ -258,28 +258,29 @@ execute_pipeline
     → download / prepare
     → extract_audio (ffmpeg)
     → transcribe (faster-whisper)     ← 产出 text.txt + subtitle.srt
-    → 🆕 analyze_subtitle             ← 步骤 4.5: DeepSeek 纯文本 → guided_timestamps.json
-    → extract_keyframes               ← 步骤 4.7: 传入 guided_timestamps → frames/*.png + keyframes.json
-    → 🆕 review_screenshots           ← 步骤 7.1: DeepSeek Vision → 审查表 + 选中截图列表
-    → 🆕 detect_tutorial_mode         ← 步骤 7.4: DeepSeek Vision → is_tutorial
-    → 🆕 copy_selected_frames         ← 复制选中截图到 assets/{VIDEO_ID}/
-    → ai::generate_note               ← 注入审查结果 + 教程模式 flag → 更高质量笔记
+    → ✅ analyze_subtitle             ← 步骤 4.5: vision.rs:analyze_subtitle, pipeline.rs:606
+    → extract_keyframes_guided        ← 步骤 4.7: 传入 guided_timestamps → frames/*.png + keyframes.json (pipeline.rs:654)
+    → ✅ review_keyframes             ← 步骤 7.1: vision.rs:review_keyframes (DeepSeek Vision), pipeline.rs:697
+    → ✅ detect_tutorial_mode         ← 步骤 7.4: vision.rs:detect_tutorial_mode, pipeline.rs:766
+    → copy_selected_frames            ← 复制选中截图到 assets/{VIDEO_ID}/
+    → ai::generate_note               ← 注入审查结果 + 教程模式 flag → 更高质量笔记 (engine.rs:57)
     → save_note
 ```
 
-### 4.3 新增 Rust 模块
+### 4.3 Rust 模块结构（已实现）
+
+> ✅ `ai/vision.rs` 已落地（721 行），含 `analyze_subtitle` / `review_keyframes` / `detect_tutorial_mode`。视频/字幕/审查逻辑集中在单文件 `pipeline.rs`（2155 行）中调用，**不存在** `pipeline/video.rs`、`pipeline/subtitle.rs`、`pipeline/review.rs` 等子模块。
 
 ```
 apps/desktop/src-tauri/src/commands/
 ├── ai/
-│   ├── mod.rs           ← 已有（文本生成）
-│   ├── types.rs         ← 已有
-│   └── vision.rs        ← 🆕 DeepSeek Vision API 封装
-├── pipeline/
-│   ├── mod.rs           ← 已有
-│   ├── video.rs         ← 🆕 视频管线专用逻辑
-│   ├── subtitle.rs      ← 🆕 字幕分析 (步骤 4.5)
-│   └── review.rs        ← 🆕 截图审查 (步骤 7.1)
+│   ├── mod.rs           ← 模块入口
+│   ├── types.rs         ← AiTask 枚举（含 screenshot_review/subtitle_analysis/tutorial_detection）+ 类型
+│   ├── engine.rs        ← MindEngine（文本生成入口 generate_note）
+│   ├── deepseek.rs      ← DeepSeek API client + mind-stream 事件
+│   └── vision.rs        ← ✅ DeepSeek Vision API 封装（721 行，已实现）
+├── pipeline.rs          ← ✅ 单文件（2155 行），集成字幕分析/guided 截图/审查/教程检测
+└── ...
 ```
 
 ### 4.4 配置扩展
@@ -308,17 +309,19 @@ export const FeaturesSchema = z.object({
 
 ## 五、实现优先级建议
 
-| 优先级 | 任务 | 理由 | 预估工时 |
-|--------|------|------|----------|
-| **P0** | `ai/vision.rs` — DeepSeek Vision API 基础封装 | 所有视觉功能的基础 | 2h |
-| **P1** | 步骤 7.1 截图审查（混合方案） | 对笔记质量提升最直接 | 3h |
-| **P1** | 审查结果注入 `generate_note` prompt | 让 AI 知道哪些截图该嵌入 | 1h |
-| **P2** | 步骤 4.5 字幕分析 → 引导截图 | 提高截图精准度 | 2h |
-| **P2** | 步骤 7.4 教程模式检测 | 锦上添花 | 1h |
-| **P3** | 截图自动复制到 assets/ | 文件操作，不依赖 AI | 1h |
-| **P3** | 配置 Schema 扩展 + 设置页 | 用户可控制 | 1h |
+> ✅ **均已完成**：以下所有任务（P0/P1/P2/P3）已全部落地。`ai/vision.rs`（721 行）封装了 DeepSeek Vision API，字幕分析/截图审查/教程检测/审查结果注入笔记均已上线，`pipeline.rs` 全链路调用。本节保留作为设计回溯记录。
 
-**总计：约 11 小时**
+| 优先级 | 任务 | 理由 | 状态 |
+|--------|------|------|------|
+| **P0** | `ai/vision.rs` — DeepSeek Vision API 基础封装 | 所有视觉功能的基础 | ✅ 已完成（721 行） |
+| **P1** | 步骤 7.1 截图审查（混合方案） | 对笔记质量提升最直接 | ✅ 已完成（`review_keyframes`） |
+| **P1** | 审查结果注入 `generate_note` prompt | 让 AI 知道哪些截图该嵌入 | ✅ 已完成（pipeline.rs 注入） |
+| **P2** | 步骤 4.5 字幕分析 → 引导截图 | 提高截图精准度 | ✅ 已完成（`analyze_subtitle` + `extract_keyframes_guided`） |
+| **P2** | 步骤 7.4 教程模式检测 | 锦上添花 | ✅ 已完成（`detect_tutorial_mode`） |
+| **P3** | 截图自动复制到 assets/ | 文件操作，不依赖 AI | ✅ 已完成 |
+| **P3** | 配置 Schema 扩展 + 设置页 | 用户可控制 | ✅ 已完成 |
+
+**历史预估：约 11 小时（已全部完成）**
 
 ---
 

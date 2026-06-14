@@ -235,6 +235,8 @@
 
 ## 2.5 修为页状态
 
+> ⚠️ 当前实现状态：`apps/desktop/src/components/dashboard/DashboardView.tsx` **硬编码了 15 条 `REAL_NOTES` 假数据常量**，`onOpenNote / onRefresh / onOpenDir` 等回调目前都是 `console.log`。后端尚未提供笔记扫描 / 统计命令，修为面板的境界、统计、最近笔记、标签分布、成就全部基于这套示例数据渲染。`@myriad-mind/core` 中的 `calculateCultivation` / `checkAchievements` 计算逻辑已就绪，但喂的是假数据。下方状态设计描述的是目标行为，接入真实笔记扫描后才能落实。
+
 ### 空状态
 
 当没有笔记：
@@ -578,7 +580,7 @@
 
 当前暗色基调可以保留，但建议明确语义色：
 
-- 主色：紫蓝，用于主按钮、选中状态、当前进度。
+- 主色：蓝色（`--brand-primary: #1683ff`，见 App.css），用于主按钮、选中状态、当前进度。紫色仅作点缀 / 渐变，不作主色。
 - 成功：绿色，用于已配置、已完成。
 - 警告：黄色，用于可降级。
 - 错误：红色，用于阻塞。

@@ -48,20 +48,24 @@ myriad-mind-app/
 
 Rust 后端通过 `commands/` 模块暴露 Tauri IPC 命令，每个 Python 脚本遵循统一模式：`Command::new → .output() → 检查 exit code → 解析 JSON stdout`。进度通过 Tauri events 实时推送到 React 前端。
 
+### 提示词外置（PromptManager）
+
+所有 AI 提示词外置到 `apps/desktop/src-tauri/prompts/*.md`，运行时由 `commands/ai/prompt_manager.rs` 的 `PromptManager` 用 minijinja 渲染。**改提示词只改 .md，不用动 Rust、不用重编译**（dev 重启 App 即生效；打包后用户可在 resources/prompts/ 自定义学习风格）。模板语法：`{{ var }}` 变量、`{% if %}` 条件、`{% include %}` 引入子模板。`engine.rs::content_mode_key()` 把 content_type 字符串映射到 `prompts/note/mode_{video,code,article,document,short}.md`。
+
 ### 移动端功能裁剪
 
 移动端 v1 不做；v2 再考虑轻量阅读、配置同步和文章处理。移动端不跑重型视频/ASR 工具，也不作为当前排期依据。
 
 ### 安全模型
 
-- `myriad-mind-config.json` — 非敏感配置 (功能开关/输出路径/模型参数)
+- `config.json` — 非敏感配置 (功能开关/输出路径/模型参数)
 - **OS 密钥链** — 所有 API Key/Token (DeepSeek Key, AI Douyin Key, TikHub Token)，永不明文存储
 - Windows: Credential Manager / macOS: Keychain / Linux: libsecret / Android: Keystore / iOS: Keychain
 - 配置文件有版本号 (`version: 1`) 支持迁移
 
 ### 笔记存储
 
-纯 `.md` + `assets/{VIDEO_ID}/` 截图子目录。SQLite (FTS5) 轻量索引加速搜索和面板统计。不做同步服务器 — 用户把输出目录选在云盘文件夹即可跨设备。
+纯 `.md` + 共享 `assets/` 截图目录（平铺结构：`分类/标题.md`）。`.myriad-mind/` 知识库索引（JSON + 指纹去重）用于搜索和面板统计（**未用 SQLite/FTS5**）。不做同步服务器 — 用户把输出目录选在云盘文件夹即可跨设备。
 
 ## 上游依赖
 
@@ -89,7 +93,7 @@ Rust 后端通过 `commands/` 模块暴露 Tauri IPC 命令，每个 Python 脚�
 - `docs/参考资料/法律风险分析.md` — 法律风险分析 + 免责模板
 - `docs/需求与排期.md` — 需求整理 & 任务拆解 & 时间评估
 - `docs/项目管理/开发任务清单.md` — 当前开发进度跟踪
-- `.gitignore` — 注意 `myriad-mind-config.json` 被忽略（含占位示例文件），密钥文件 (.jks/.p8/.key/.mobileprovision) 被忽略
+- `.gitignore` — 注意 `config.json` 被忽略（含占位示例文件），密钥文件 (.jks/.p8/.key/.mobileprovision) 被忽略
 
 ## 开发环境
 

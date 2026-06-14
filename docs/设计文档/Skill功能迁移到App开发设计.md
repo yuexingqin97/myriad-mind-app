@@ -311,6 +311,8 @@ App 当前已有部分：
 
 ## 4.6 字幕引导截图模块
 
+> ✅ **已实现**：见 `apps/desktop/src-tauri/src/commands/ai/vision.rs`（`analyze_subtitle` 字幕分析 + `review_keyframes` 截图审查）+ `pipeline.rs` 全链路接入。字幕分析→guided 截图→审查→教程检测已在 `pipeline.rs:606/654/697/766` 接入。
+
 这是 Skill v2.1 最值得迁移的功能。
 
 Skill 流程：
@@ -388,6 +390,8 @@ App 开发重点：
 
 ## 4.7 AI 笔记生成模块
 
+> ✅ **已实现**：MindEngine（`ai/engine.rs`）已接入 DeepSeek V4 Pro / Flash 流式生成；`pipeline.rs` 通过 `ai::generate_note`（`pipeline.rs:874/1173`）调用，截图审查/教程检测结果已注入 prompt。
+
 Skill 原型中由 Claude 负责：
 
 - 摘要。
@@ -456,6 +460,8 @@ App 需要开发：
 
 ## 4.9 代码项目分析模式
 
+> ⚠️ **部分实现**：本地代码目录扫描 + 项目规模识别**已实现**（`commands/code_project.rs`）；**GitHub URL clone 未实现**。
+
 Skill 已设计：
 
 - GitHub URL clone 到临时目录。
@@ -463,13 +469,15 @@ Skill 已设计：
 - 判断项目规模。
 - 生成架构分析、Mermaid 图、阅读路线。
 
-App 迁移建议放到 v1.1。
+App 当前实现状态：
 
-开发功能：
+- ✅ **本地代码目录扫描**：`code_project.rs` 实现文件树扫描、忽略规则（`node_modules`/`target`/`.git`/`dist` 等）、语言统计、项目规模评估。
+- ✅ **代码项目识别**：代码文件占比 > 50% 判定代码项目。
+- ❌ **GitHub clone**：未实现，需后续补 `git` 子进程 clone 到临时目录。
+
+待开发：
 
 - GitHub clone。
-- 文件树扫描。
-- 语言统计。
 - 忽略规则：`node_modules`、`target`、`.git`、`dist` 等。
 - 项目规模评估：
   - 概览模式。
@@ -900,12 +908,12 @@ P2：
 | 配置引导 | `.env` 文档 | 有 UI | 需补 AI / smart keyframes |
 | 视频管线 | 完整规则 | Rust 管线雏形 | 下载和 AI 生成未打通 |
 | ASR | 脚本成熟 | 已封装部分脚本 | 结果结构化和缓存复用不足 |
-| 关键帧 | v2.1 smart | 旧 interval 配置 | 需重做为字幕引导 |
-| AI 生成 | Claude Skill 原型 | DeepSeek 设计已定，代码待接入 | 需实现 MindEngine |
+| 关键帧 | v2.1 smart | ✅ 字幕引导截图已迁移（`ai/vision.rs` + `pipeline.rs` guided 截图 + 审查） | 已实现 smart 截图 |
+| AI 生成 | Claude Skill 原型 | ✅ MindEngine 已实现（`ai/engine.rs`，Pro/Flash 流式生成） | 已接入，pipeline.rs 调用 ai::generate_note |
 | 修为面板 | 完整规则 | mock UI | 需真实扫描 |
 | 搜索 | grep 原型 | 无 | 需新增 |
 | 对比 | prompt 原型 | core 有 compare prompt | 需 UI / 管线 |
-| 代码项目 | 规则完整 | prompt 有 | 需扫描和输入识别 |
+| 代码项目 | 规则完整 | ✅ 本地扫描+识别已实现（`code_project.rs`） | GitHub clone 未实现 |
 | 批量 | 规则完整 | 无 | 需任务队列 |
 
 ---

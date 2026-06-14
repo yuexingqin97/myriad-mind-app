@@ -307,7 +307,10 @@ export type AiTask =
   | "code_analysis"
   | "compare"
   | "resource_recommend"
-  | "next_step_suggestion";
+  | "next_step_suggestion"
+  | "screenshot_review"      // 截图审查（DeepSeek Vision）
+  | "subtitle_analysis"      // 字幕分析→引导截图时间点
+  | "tutorial_detection";    // 教程操作模式检测
 
 export interface ModelInfo {
   id: string;
@@ -338,10 +341,10 @@ export const DEEPSEEK_MODELS: ModelInfo[] = [
     maxOutputTokens: 384_000,
     supportsStreaming: true,
     supportsReasoning: true,
-    supportsVision: false,
+    supportsVision: true,   // ✅ 已启用：DeepSeek Vision 模式用于截图审查（vision.rs）
     supportsJsonMode: true,
     costTier: "medium",
-    recommendedFor: ["note_generation", "code_analysis", "compare"],
+    recommendedFor: ["note_generation", "code_analysis", "compare", "screenshot_review", "subtitle_analysis", "tutorial_detection"],
   },
   {
     id: "deepseek-v4-flash",
@@ -362,27 +365,29 @@ export const DEEPSEEK_MODELS: ModelInfo[] = [
 
 ## 6.2 Tauri 后端
 
-建议新增：
+> ✅ **已实现**：`ai/` 模块当前结构如下（见实际代码）。**不存在** `router.rs`、`errors.rs`；模型路由（Pro/Flash 选择）逻辑直接写在 `engine.rs` 内，未拆独立 router。
+
+实际结构：
 
 ```text
 apps/desktop/src-tauri/src/commands/ai/
-├── mod.rs
-├── types.rs
-├── engine.rs
-├── deepseek.rs
-├── router.rs
-└── errors.rs
+├── mod.rs          ← 模块入口
+├── types.rs        ← AiTask 枚举（10 种，含截图审查/字幕分析/教程检测）+ 数据结构
+├── engine.rs       ← MindEngine：generate_note 入口 + Pro/Flash 路由逻辑
+├── deepseek.rs     ← DeepSeek API client + mind-stream 事件发射
+└── vision.rs       ← DeepSeek Vision API 封装（analyze_subtitle/review_keyframes/detect_tutorial_mode，721 行）
 ```
 
-第一版只实现：
+第一版已实现：
 
 ```text
-DeepSeekClient
-MindEngine
-mind-stream event
+DeepSeekClient   (deepseek.rs)
+MindEngine       (engine.rs, 含 Pro/Flash 路由)
+mind-stream event (deepseek.rs emit, 子类型 delta/reasoning/usage/done)
+DeepSeek Vision  (vision.rs)
 ```
 
-后续再拆成：
+后续扩展时再拆 providers/：
 
 ```text
 providers/deepseek.rs
@@ -522,7 +527,9 @@ finish_reason
 
 ## 8.3 统一事件
 
-建议替换当前 `claude-stream-delta` 为：
+> ✅ **已落地**：当前流式事件统一为 `mind-stream`（`deepseek.rs` 发射，子类型 `delta` / `reasoning_delta` / `usage` / `done`）。历史上提到的 `claude-stream-delta` 早已不存在。
+
+统一事件名：
 
 ```text
 mind-stream
@@ -812,20 +819,15 @@ Base URL: https://api.deepseek.com
 
 # 十四、与现有管线结合
 
-当前 `pipeline.rs` 中 AI 生成还是 TODO：
+> ✅ **已接入**：`pipeline.rs` 已调用 `ai::generate_note`（视频 `pipeline.rs:874`，文章/文本 `pipeline.rs:1173`），不再是 TODO。前端通过 `mind-stream` 事件接收流式输出。
 
-```text
-emit_progress(app, "generate_note", "AI 生成笔记", ...)
-// TODO: MindEngine / DeepSeek
-```
-
-后续改为：
+实际管线（已落地）：
 
 ```text
 run_video_pipeline
-  → 收集 transcript / keyframes / metadata
+  → 收集 transcript / keyframes / metadata / 截图审查结果 / 教程模式 flag
   → buildVideoNotePrompt(context)
-  → run_mind_task(task = note_generation, model = deepseek-v4-pro)
+  → ai::generate_note(task = note_generation, model = deepseek-v4-pro)
   → 前端接收 mind-stream delta
   → 保存 note.md
 ```

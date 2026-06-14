@@ -1,9 +1,11 @@
 // ============================================================
 // Vision 视觉管线 — 字幕分析 + 截图审查 + 教程检测
 // 全部通过 DeepSeek V4 Vision API 完成
+// 提示词外置到 prompts/vision/，由 PromptManager 渲染
 // ============================================================
 
 use super::deepseek::{encode_image_to_data_url, vision_complete};
+use super::prompt_manager::PromptManager;
 use super::types::{
     AiTask, FrameReview, GuidedTimestamp, ReviewedFrame, ScreenshotReviewConfig,
     ScreenshotReviewResult, TutorialDetectionResult, VisionContentBlock, VisionMessage,
@@ -25,27 +27,14 @@ pub async fn analyze_subtitle(
     model: Option<&str>,
 ) -> Result<Vec<GuidedTimestamp>, AppError> {
     let api_key = read_deepseek_key()?;
-
-    let system_prompt = format!(
-        "你是一个视频字幕分析器。请分析以下视频字幕，找出画面价值高的时刻（适合截图的瞬间）。\n\
-        视频总时长：{:.0} 秒（约 {:.0} 分钟）\n\n\
-        ## 识别信号\n\
-        - 画面展示: \"看这段代码\"、\"如图所示\"、\"注意这个表格\"、\"我们来看一下\"\n\
-        - 操作演示: \"点击这里\"、\"打开终端\"、\"运行一下\"、\"输入以下命令\"\n\
-        - 代码相关: \"这段代码\"、\"函数定义\"、\"配置文件\"、\"这个接口\"\n\
-        - PPT翻页: \"下一页\"、\"接下来看\"、\"第一个要点\"、\"这一章\"、\"总结一下\"\n\
-        - 对比切换: \"对比一下\"、\"切换到\"、\"改成\"、\"前后的区别\"\n\
-        - 运行效果: \"运行结果\"、\"输出是\"、\"报错了\"、\"执行效果\"\n\n\
-        ## 不推荐的时刻\n\
-        - 开场闲聊、个人介绍、片尾预告、过渡寒暄\n\n\
-        ## 输出格式\n\
-        返回 JSON 数组，每个元素包含 ts（秒数，精确到整数）和 reason（20字以内）：\n\
-        [{{\"ts\": 32, \"reason\": \"PPT标题页：ECS三大核心概念\"}}, ...]\n\
-        推荐 8-25 个时间点。如果视频为纯谈话无技术内容，输出空数组 []。\n\n\
-        只输出 JSON 数组，不要其他内容。",
-        video_duration_seconds,
-        video_duration_seconds / 60.0
-    );
+    let pm = PromptManager::new()?;
+    let system_prompt = pm.render(
+        "vision/subtitle",
+        minijinja::context! {
+            video_duration_seconds => video_duration_seconds.round() as u64,
+            video_duration_minutes => (video_duration_seconds / 60.0).round() as u64,
+        },
+    )?;
 
     let request = VisionRequest {
         task: AiTask::SubtitleAnalysis,
@@ -128,12 +117,15 @@ pub async fn review_keyframes(
     }
 
     let api_key = read_deepseek_key()?;
+    let pm = PromptManager::new()?;
 
-    // 按模式决定审查策略
+    // 按模式决定审查策略（pm 复用，避免循环内重复扫描模板目录）
     let reviews = match config.mode.as_str() {
-        "batch" => review_batch(&frames, subtitle_srt, frames_dir, &api_key).await?,
-        "single" => review_single(&frames, subtitle_srt, frames_dir, &api_key, config).await?,
-        _ => review_hybrid(&frames, subtitle_srt, frames_dir, &api_key, config).await?,
+        "batch" => review_batch(&pm, &frames, subtitle_srt, frames_dir, &api_key).await?,
+        "single" => {
+            review_single(&pm, &frames, subtitle_srt, frames_dir, &api_key, config).await?
+        }
+        _ => review_hybrid(&pm, &frames, subtitle_srt, frames_dir, &api_key, config).await?,
     };
 
     // 去重 + 按分数筛选
@@ -184,13 +176,14 @@ pub async fn review_keyframes(
 
 /// 批量审查（一次提交所有截图）
 async fn review_batch(
+    pm: &PromptManager,
     frames: &[serde_json::Value],
     subtitle_srt: &str,
     frames_dir: &std::path::Path,
     api_key: &str,
 ) -> Result<Vec<FrameReview>, AppError> {
     let mut content_blocks: Vec<VisionContentBlock> = vec![VisionContentBlock::Text {
-        text: build_batch_review_prompt(frames, subtitle_srt),
+        text: build_batch_review_prompt(pm, frames, subtitle_srt)?,
     }];
 
     // 添加所有截图
@@ -220,7 +213,7 @@ async fn review_batch(
             role: "user".into(),
             content: content_blocks,
         }],
-        system_prompt: build_review_system_prompt(),
+        system_prompt: build_review_system_prompt(pm)?,
         max_tokens: 8192,
         model_override: None,
     };
@@ -231,6 +224,7 @@ async fn review_batch(
 
 /// 逐张审查
 async fn review_single(
+    pm: &PromptManager,
     frames: &[serde_json::Value],
     subtitle_srt: &str,
     frames_dir: &std::path::Path,
@@ -284,12 +278,13 @@ async fn review_single(
                 content: vec![
                     VisionContentBlock::Text {
                         text: build_single_review_prompt(
+                            pm,
                             i + 1,
                             frames.len(),
                             timestamp,
                             subtitle_srt,
                             prev_type,
-                        ),
+                        )?,
                     },
                     VisionContentBlock::ImageUrl {
                         image_url: super::types::ImageUrl {
@@ -299,7 +294,7 @@ async fn review_single(
                     },
                 ],
             }],
-            system_prompt: build_review_system_prompt(),
+            system_prompt: build_review_system_prompt(pm)?,
             max_tokens: 1024,
             model_override: Some("deepseek-v4-flash".into()),
         };
@@ -320,6 +315,7 @@ async fn review_single(
 
 /// 混合审查：先批量粗筛，再逐张精审
 async fn review_hybrid(
+    pm: &PromptManager,
     frames: &[serde_json::Value],
     subtitle_srt: &str,
     frames_dir: &std::path::Path,
@@ -328,12 +324,12 @@ async fn review_hybrid(
 ) -> Result<Vec<FrameReview>, AppError> {
     // 少于 10 张直接批量
     if frames.len() <= 10 {
-        return review_batch(frames, subtitle_srt, frames_dir, api_key).await;
+        return review_batch(pm, frames, subtitle_srt, frames_dir, api_key).await;
     }
 
     // 第一次：批量快速粗筛（用 Flash + low detail 省 token）
     log::info!("[vision] hybrid: batch pre-scan {} frames", frames.len());
-    let pre_scan = review_batch(frames, subtitle_srt, frames_dir, api_key).await?;
+    let pre_scan = review_batch(pm, frames, subtitle_srt, frames_dir, api_key).await?;
 
     // 找出需要精审的帧（分数在边界附近的）
     let mut refined = vec![None; frames.len()];
@@ -371,6 +367,11 @@ async fn review_hybrid(
         };
 
         let timestamp = frame["timestamp_seconds"].as_f64().unwrap_or(0.0);
+        let prev_type = if i > 0 {
+            pre_scan[i - 1].type_tag.as_str()
+        } else {
+            "无"
+        };
 
         let request = VisionRequest {
             task: AiTask::ScreenshotReview,
@@ -378,18 +379,15 @@ async fn review_hybrid(
                 role: "user".into(),
                 content: vec![
                     VisionContentBlock::Text {
-                        text: format!(
-                            "这张截图在批量粗筛中得了 2 分（边界）。请仔细确认：\n\
-                            时间戳: {:.0}s\n批次索引: {}/{}\n前次类型: {}",
-                            timestamp,
-                            i + 1,
-                            frames.len(),
-                            if i > 0 {
-                                pre_scan[i - 1].type_tag.as_str()
-                            } else {
-                                "无"
-                            }
-                        ),
+                        text: pm.render(
+                            "vision/review_boundary",
+                            minijinja::context! {
+                                timestamp_secs => timestamp.round() as u64,
+                                index => i + 1,
+                                total => frames.len(),
+                                prev_type => prev_type,
+                            },
+                        )?,
                     },
                     VisionContentBlock::ImageUrl {
                         image_url: super::types::ImageUrl {
@@ -399,7 +397,7 @@ async fn review_hybrid(
                     },
                 ],
             }],
-            system_prompt: build_review_system_prompt(),
+            system_prompt: build_review_system_prompt(pm)?,
             max_tokens: 1024,
             model_override: Some("deepseek-v4-flash".into()),
         };
@@ -428,20 +426,17 @@ pub async fn detect_tutorial_mode(
     first_frames: &[PathBuf],
 ) -> Result<TutorialDetectionResult, AppError> {
     let api_key = read_deepseek_key()?;
+    let pm = PromptManager::new()?;
+    let user_prompt = pm.render(
+        "vision/tutorial",
+        minijinja::context! {
+            frame_count => first_frames.len(),
+            video_title => video_title,
+        },
+    )?;
 
     let mut content_blocks: Vec<VisionContentBlock> = vec![VisionContentBlock::Text {
-        text: format!(
-            "根据视频标题和前 {} 张关键帧截图，判断这是否为\"操作型教程\"。\n\n\
-            视频标题: {video_title}\n\n\
-            操作型教程特征：\n\
-            - 标题含\"教程\"/\"入门\"/\"实战\"/\"配置\"/\"搭建\"/\"tutorial\"/\"how to\"\n\
-            - 画面中有大量 IDE/终端/操作界面截图\n\
-            - 内容以\"一步步跟着做\"为主\n\n\
-            输出 JSON：\n\
-            {{\"is_tutorial\": true/false, \"confidence\": 0.0-1.0, \"signals\": [\"标题含'教程'\", \"5张中有4张是操作界面\"]}}\n\n\
-            只输出 JSON，不要其他内容。",
-            first_frames.len()
-        ),
+        text: user_prompt,
     }];
 
     for path in first_frames.iter().take(5) {
@@ -466,6 +461,7 @@ pub async fn detect_tutorial_mode(
             role: "user".into(),
             content: content_blocks,
         }],
+        // system 极短，保留代码内；user prompt 外置到 vision/tutorial.md
         system_prompt: "你是一个视频内容分类器。判断视频是否为操作型教程。只输出 JSON。".into(),
         max_tokens: 512,
         model_override: Some("deepseek-v4-flash".into()),
@@ -496,64 +492,43 @@ pub async fn detect_tutorial_mode(
 }
 
 // ============================================================
-// Prompt 模板
+// Prompt 模板渲染（模板文件在 prompts/vision/）
 // ============================================================
 
-fn build_review_system_prompt() -> String {
-    r#"你是一个视频学习笔记的截图审查员。请分析视频截图，判断其是否值得嵌入学习笔记。
-
-## 类型标签（必须选一个）
-PPT_TITLE: PPT标题页/大纲/章节分隔页 → 3分
-CODE_BLOCK: 代码/配置文件/终端输出 → 3分
-ARCH_DIAGRAM: 架构图/流程图/数据流图 → 3分
-RUN_RESULT: 程序运行效果/错误输出 → 3分
-TOOL_UI: 编辑器/IDE/工具操作界面 → 3分
-DATA_TABLE: 数据表格/对比表 → 2分
-SIMPLE_CHART: 简单图表 → 2分
-SPLIT_SCREEN: 分屏布局(讲师+代码) → 2分
-TALKING_HEAD: 说话人脸(无辅助视觉信息) → 0分
-PLAIN_TEXT: 纯文字段落(字幕已覆盖) → 0分
-BLACK_SCREEN: 黑屏/过渡动画 → 0分
-NO_INFO: 空桌面/模糊/无关 → 0分
-
-## 评分规则
-最终得分 = 基础分 × 上下文加成
-- 实质性技术内容 + 信息画面: ×1.0
-- 实质性技术内容 + 静态人脸: ×0（跳过）
-- 闲聊/过渡 + 任何画面: ×0.3
-- 无字幕时段: ×0（跳过）
-
-≥3分 → 必选 ✅
-=2分 → 可选 ⚖️
-≤1分 → 跳过 ❌
-
-## 输出格式
-每张截图输出一行 JSON（不嵌套在数组里）:
-{"type_tag": "...", "info_score": 0-3, "similarity_vs_prev": 0-1, "embed_section": "...", "reason": "20字以内"}"#
-        .to_string()
+fn build_review_system_prompt(pm: &PromptManager) -> Result<String, AppError> {
+    pm.render("vision/review_system", ())
 }
 
 fn build_single_review_prompt(
+    pm: &PromptManager,
     index: usize,
     total: usize,
     timestamp_secs: f64,
     subtitle_srt: &str,
     prev_type: &str,
-) -> String {
+) -> Result<String, AppError> {
     let ts_min = (timestamp_secs / 60.0) as u32;
     let ts_sec = (timestamp_secs as u32) % 60;
     let subtitle_snippet = extract_subtitle_context(subtitle_srt, timestamp_secs);
-
-    format!(
-        "审查第 {index}/{total} 张截图。\n\
-        时间戳: {ts_min}m{ts_sec:02}s ({timestamp_secs:.0}s)\n\
-        前一张类型: {prev_type}\n\n\
-        对应字幕片段:\n{subtitle_snippet}\n\n\
-        请判断类型、信息增量、相似度，输出一行 JSON。"
+    pm.render(
+        "vision/review_single",
+        minijinja::context! {
+            index => index,
+            total => total,
+            ts_min => ts_min,
+            ts_sec_str => format!("{ts_sec:02}"),
+            timestamp_secs => timestamp_secs.round() as u64,
+            prev_type => prev_type,
+            subtitle_snippet => &subtitle_snippet,
+        },
     )
 }
 
-fn build_batch_review_prompt(frames: &[serde_json::Value], subtitle_srt: &str) -> String {
+fn build_batch_review_prompt(
+    pm: &PromptManager,
+    frames: &[serde_json::Value],
+    subtitle_srt: &str,
+) -> Result<String, AppError> {
     let frame_list: Vec<String> = frames
         .iter()
         .enumerate()
@@ -576,13 +551,13 @@ fn build_batch_review_prompt(frames: &[serde_json::Value], subtitle_srt: &str) -
         subtitle_srt.to_string()
     };
 
-    format!(
-        "请审查以下 {} 张视频截图（图片按顺序附在下方）。\n\n\
-        ## 截图列表\n{}\n\n\
-        ## 字幕参考\n{subtitle_summary}\n\n\
-        为每张截图输出一行 JSON 审查结果，逐行输出，不要用数组包裹。",
-        frames.len(),
-        frame_list.join("\n"),
+    pm.render(
+        "vision/review_batch",
+        minijinja::context! {
+            frame_count => frames.len(),
+            frame_list => frame_list.join("\n"),
+            subtitle_summary => &subtitle_summary,
+        },
     )
 }
 
