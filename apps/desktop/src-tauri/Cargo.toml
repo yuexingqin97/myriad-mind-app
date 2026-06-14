@@ -31,12 +31,6 @@ base64 = "0.22"
 dom_query = "0.27"
 minijinja = "2"
 
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
-  "Win32_Security_Credentials",
-  "Win32_Foundation",
-] }
-
 [profile.release]
 panic = "abort"
 codegen-units = 1

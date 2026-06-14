@@ -206,24 +206,23 @@ export async function listAiDouyinTasks(
   return null;
 }
 
-// ---- 密钥链 ----
+// ---- 配置字段（API Key 等，存 config.json）----
 
-export async function storeKeychainEntry(service: string, account: string, secret: string): Promise<void> {
+export async function getConfigValue(key: string): Promise<string> {
   if (await ensureTauri()) {
-    await tauriInvoke!("store_keychain_entry", { service, account, secret });
+    const v = (await tauriInvoke!("get_config_value", { key })) as string | null;
+    return v ?? "";
+  }
+  return localStorage.getItem(`configValue/${key}`) ?? "";
+}
+
+export async function setConfigValue(key: string, value: string): Promise<void> {
+  if (await ensureTauri()) {
+    await tauriInvoke!("set_config_value", { key, value });
     return;
   }
-  localStorage.setItem(`keyring/${service}`, secret);
-}
-
-export async function readKeychainEntry(service: string, account: string): Promise<string> {
-  if (await ensureTauri()) return tauriInvoke!("read_keychain_entry", { service, account }) as Promise<string>;
-  return localStorage.getItem(`keyring/${service}`) ?? "";
-}
-
-export async function checkKeychainEntry(service: string, account: string): Promise<{ exists: boolean }> {
-  if (await ensureTauri()) return tauriInvoke!("check_keychain_entry", { service, account }) as Promise<{ exists: boolean }>;
-  return { exists: !!localStorage.getItem(`keyring/${service}`) };
+  if (value) localStorage.setItem(`configValue/${key}`, value);
+  else localStorage.removeItem(`configValue/${key}`);
 }
 
 

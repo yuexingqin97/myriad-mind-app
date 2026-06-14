@@ -1728,22 +1728,17 @@ fn fetch_video_metadata(python_path: &str, url: &str) -> Option<(String, String,
 /// B站/抖音/小红书 走此路径；YouTube 直接用 yt-dlp
 async fn resolve_via_ai_douyin(video_url: &str, temp_dir: &std::path::Path) -> Result<PathBuf, AppError> {
     // 读取 AI Douyin API Key（优先级：配置文件 > OS 密钥链）
-    let douyin_key = if let Some(key) = crate::commands::config::read_config_value("ai_douyin_api_key") {
-        log::info!("[douyin] found api key in config file (len={})", key.len());
-        key
-    } else {
-        match crate::commands::config::cred_read("ai-douyin-api-key") {
-            Ok(Some(k)) if !k.is_empty() => {
-                log::info!("[douyin] found api key in credential manager (len={})", k.len());
-                k
-            }
-            _ => {
-                log::warn!("[douyin] key not found in config file or credential manager");
-                return Err(AppError::Ai {
-                    kind: "provider_not_configured".into(),
-                    message: "未配置 AI Douyin API Key。请在设置 → API 密钥 中配置，或在配置文件 myriad-mind-config.json 中添加 ai_douyin_api_key 字段。aidouyin.com 注册获取免费额度。".into(),
-                });
-            }
+    let douyin_key = match crate::commands::config::read_config_value("ai_douyin_api_key") {
+        Some(key) => {
+            log::info!("[douyin] found api key in config file (len={})", key.len());
+            key
+        }
+        None => {
+            log::warn!("[douyin] ai_douyin_api_key not found in config file");
+            return Err(AppError::Ai {
+                kind: "provider_not_configured".into(),
+                message: "未配置 AI Douyin API Key。请在设置 → API 密钥 中配置 ai_douyin_api_key。aidouyin.com 注册获取免费额度。".into(),
+            });
         }
     };
 
@@ -1792,9 +1787,7 @@ async fn download_douyin_video(
     temp_dir: &std::path::Path,
 ) -> Result<String, AppError> {
     // 读取 Key（resolve_via_ai_douyin 内部也会读，这里需要再读一次传给脚本）
-    let douyin_key = crate::commands::config::read_config_value("ai_douyin_api_key")
-        .or_else(|| crate::commands::config::cred_read("ai-douyin-api-key").ok().flatten())
-        .unwrap_or_default();
+    let douyin_key = crate::commands::config::read_config_value("ai_douyin_api_key").unwrap_or_default();
 
     let json_path = resolve_via_ai_douyin(video_url, temp_dir).await?;
 

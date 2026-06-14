@@ -12,6 +12,8 @@ import appIcon from "@/assets/icons/myriad-mind-whale-icon-concept.png";
 interface SettingsViewProps {
   config: MyriadMindConfig;
   onSave: (c: MyriadMindConfig) => void;
+  /** API Key 单独保存后，重新从 config.json 加载同步 state */
+  reloadConfig: () => Promise<void>;
   firstLaunch: boolean;
   onFinishWizard: () => void;
   /** 导航到炼化页（完成向导后） */
@@ -27,7 +29,7 @@ function toDepInfo(d: DepResult | undefined) {
 
 // ---- Component ----
 
-export function SettingsView({ config, onSave, firstLaunch, onFinishWizard, onNavigateToInput }: SettingsViewProps) {
+export function SettingsView({ config, onSave, reloadConfig, firstLaunch, onFinishWizard, onNavigateToInput }: SettingsViewProps) {
   const [showWizard, setShowWizard] = useState(firstLaunch);
   const [deps, setDeps] = useState<DepsInfo | undefined>(undefined);
   const { theme, setTheme } = useTheme();
@@ -51,18 +53,23 @@ export function SettingsView({ config, onSave, firstLaunch, onFinishWizard, onNa
   }, [detectDeps]);
 
   // Keychain adapter
-  const keychainAdapter: KeychainApi = React.useMemo(() => ({
-    async check(service: string) {
-      const result = await api.checkKeychainEntry(service, "myriad-mind");
-      return result.exists;
-    },
-    async read(service: string) {
-      return api.readKeychainEntry(service, "myriad-mind");
-    },
-    async store(service: string, secret: string) {
-      await api.storeKeychainEntry(service, "myriad-mind", secret);
-    },
-  }), []);
+  const keychainAdapter: KeychainApi = React.useMemo(() => {
+    // service 名 → config.json 字段名（连字符转下划线：deepseek-api-key → deepseek_api_key）
+    const fieldOf = (service: string) => service.replace(/-/g, "_");
+    return {
+      async check(service: string) {
+        const v = await api.getConfigValue(fieldOf(service));
+        return !!v && v.trim() !== "";
+      },
+      async read(service: string) {
+        return api.getConfigValue(fieldOf(service));
+      },
+      async store(service: string, secret: string) {
+        await api.setConfigValue(fieldOf(service), secret);
+        await reloadConfig(); // 同步 config state，避免后续全量保存覆盖
+      },
+    };
+  }, [reloadConfig]);
 
   return (
     <div className="view-container">

@@ -10,7 +10,7 @@ use super::types::{MindRequest, MindResponse};
 use crate::error::AppError;
 use tauri::AppHandle;
 
-/// 从多处读取 DeepSeek API Key（优先级：环境变量 > 配置文件 > OS 密钥链）
+/// 从多处读取 DeepSeek API Key（优先级：环境变量 > 配置文件）
 pub fn read_deepseek_key() -> Result<String, AppError> {
     // 1. 环境变量（最高优先级，CI/容器场景）
     for env_name in &["MYRIAD_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"] {
@@ -24,17 +24,6 @@ pub fn read_deepseek_key() -> Result<String, AppError> {
     // 2. 配置文件 ~/.myriad-mind-app/config.json
     if let Some(key) = crate::commands::config::read_config_value("deepseek_api_key") {
         return Ok(key);
-    }
-
-    // 3. OS 密钥链 (Windows Credential Manager)
-    #[cfg(target_os = "windows")]
-    {
-        use crate::commands::config::cred_read;
-        if let Ok(Some(key)) = cred_read("deepseek-api-key") {
-            if !key.is_empty() {
-                return Ok(key);
-            }
-        }
     }
 
     Err(AppError::Ai {

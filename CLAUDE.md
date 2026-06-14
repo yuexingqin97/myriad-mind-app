@@ -58,10 +58,10 @@ Rust 后端通过 `commands/` 模块暴露 Tauri IPC 命令，每个 Python 脚�
 
 ### 安全模型
 
-- `config.json` — 非敏感配置 (功能开关/输出路径/模型参数)
-- **OS 密钥链** — 所有 API Key/Token (DeepSeek Key, AI Douyin Key, TikHub Token)，永不明文存储
-- Windows: Credential Manager / macOS: Keychain / Linux: libsecret / Android: Keystore / iOS: Keychain
-- 配置文件有版本号 (`version: 1`) 支持迁移
+- 所有配置（含 API Key/Token：DeepSeek Key、AI Douyin Key 等）明文存于 `~/.myriad-mind-app/config.json`，用户自行保管文件安全。个人桌面工具、单用户场景，不做多用户隔离。
+- `config.json` 在用户主目录，**不入 git**（`.gitignore` 忽略 `config.json`）。
+- `commands/config.rs::write_config` 对 `deepseek_api_key`/`ai_douyin_api_key` 做保护：全量写入时若新值为空则保留磁盘值，避免前端 config state 未同步把已配置的 key 覆盖成空。
+- 配置文件有版本号 (`version: 1`) 支持迁移。
 
 ### 笔记存储
 

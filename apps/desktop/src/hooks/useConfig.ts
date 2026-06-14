@@ -12,6 +12,8 @@ interface UseConfigResult {
   firstLaunch: boolean;
   finishWizard: () => void;
   saveConfig: (c: MyriadMindConfig) => void;
+  /** 重新从 config.json 加载（API Key 单独保存后同步 state） */
+  reloadConfig: () => Promise<void>;
 }
 
 // ---- Hook ----
@@ -55,6 +57,18 @@ export function useConfig(): UseConfigResult {
     setFirstLaunch(false);
   }, []);
 
+  // 重新从 config.json 加载（API Key 单独保存后同步 state，避免全量保存覆盖）
+  const reloadConfig = useCallback(async () => {
+    if (await isTauri()) {
+      try {
+        const raw = await api.readConfig();
+        if (raw && raw !== "{}") {
+          setConfig((prev) => ({ ...prev, ...JSON.parse(raw) }));
+        }
+      } catch { /* ignore */ }
+    }
+  }, []);
+
   return {
     config,
     view,
@@ -62,5 +76,6 @@ export function useConfig(): UseConfigResult {
     firstLaunch,
     finishWizard,
     saveConfig,
+    reloadConfig,
   };
 }
