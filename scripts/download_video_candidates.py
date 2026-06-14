@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -62,6 +64,10 @@ def download_first_working_candidate(
     headers = {"User-Agent": USER_AGENT}
     if api_key:
         headers["X-API-Key"] = api_key
+    # 可选 Referer（测试 AI Douyin 中转 CDN 是否需要 Referer）：环境变量 MYRIAD_TEST_REFERER
+    test_referer = os.environ.get("MYRIAD_TEST_REFERER", "").strip()
+    if test_referer:
+        headers["Referer"] = test_referer
 
     for index, candidate in enumerate(candidates, 1):
         partial_path = output_path.with_suffix(output_path.suffix + ".part")
@@ -71,6 +77,12 @@ def download_first_working_candidate(
         request = urllib.request.Request(candidate, headers=headers)
         try:
             print(f"Trying candidate {index}: {describe_candidate(candidate)}", file=sys.stderr)
+            print(f"  URL: {candidate}", file=sys.stderr)
+            print(
+                f"  X-API-Key: {'present' if 'X-API-Key' in headers else 'absent'}"
+                f"  Referer: {headers.get('Referer', 'absent')}",
+                file=sys.stderr,
+            )
             with opener(request, timeout=timeout) as response:
                 with partial_path.open("wb") as output:
                     while True:
@@ -80,6 +92,25 @@ def download_first_working_candidate(
                         output.write(chunk)
             partial_path.replace(output_path)
             return candidate
+        except urllib.error.HTTPError as exc:
+            # 读取响应体 + 关键响应头，诊断 AI Douyin 中转 500/403 等的真实原因
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace").strip()
+            except Exception:
+                pass
+            short_body = body[:500] if body else "(empty body)"
+            ctype = exc.headers.get("Content-Type", "?")
+            server = exc.headers.get("Server", "?")
+            errors.append(
+                f"{index}: HTTP {exc.code} {exc.reason} | Content-Type={ctype} "
+                f"Server={server} | body={short_body}"
+            )
+            print(f"  ✗ candidate {index}: HTTP {exc.code} {exc.reason}", file=sys.stderr)
+            print(f"    Content-Type={ctype}  Server={server}", file=sys.stderr)
+            print(f"    body: {short_body}", file=sys.stderr)
+            if partial_path.exists():
+                partial_path.unlink()
         except Exception as exc:  # noqa: BLE001 - show all failed candidates to the user
             errors.append(f"{index}: {exc}")
             if partial_path.exists():

@@ -309,7 +309,22 @@ async fn run_video_pipeline(
         Some(&format!("平台: {mode}")),
     );
 
-    let download_result = if is_douyin_or_xhs {
+    let download_result = if media_file_ready(&video_path) {
+        // 缓存命中：video.mp4 已存在（上次 cleanup_temp=false 保留），跳过下载省 AI Douyin 积分
+        emit_progress(
+            app,
+            "download",
+            "♻️ 使用缓存视频（跳过下载，省 AI Douyin 积分）",
+            18.0,
+            "completed",
+            Some("命中 temp 缓存。需重新下载：设置关闭「保留临时文件」开关"),
+        );
+        log::info!(
+            "[pipeline] cache hit: {} exists, skip download",
+            video_path.display()
+        );
+        Ok::<String, AppError>(video_title.clone())
+    } else if is_douyin_or_xhs {
         // 抖音 / 小红书 → 必须走 AI Douyin API
         download_douyin_video(python_path, input, &video_path, &temp_dir).await
             .map_err(|e| {
