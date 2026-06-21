@@ -8,8 +8,7 @@ mod error;
 use commands::{
     ai::{run_mind_task, test_deepseek_connection},
     config::{
-        get_config_info, get_config_value, is_first_launch, read_config, reset_config,
-        set_config_value, write_config,
+        get_config_info, is_first_launch, read_config, reset_config, write_config,
     },
     deps::{
         detect_all_deps, detect_faster_whisper, detect_ffmpeg, detect_gpu, detect_python,
@@ -58,8 +57,6 @@ pub fn run() {
             read_config,
             write_config,
             reset_config,
-            get_config_value,
-            set_config_value,
             // Python 调度 (6 脚本)
             transcribe_audio,
             extract_keyframes,

@@ -206,23 +206,30 @@ export async function listAiDouyinTasks(
   return null;
 }
 
-// ---- 配置字段（API Key 等，存 config.json）----
+// ---- 重置配置（删除 config.json，下次启动重新进入首启引导）----
 
-export async function getConfigValue(key: string): Promise<string> {
+export async function resetConfig(): Promise<void> {
   if (await ensureTauri()) {
-    const v = (await tauriInvoke!("get_config_value", { key })) as string | null;
-    return v ?? "";
-  }
-  return localStorage.getItem(`configValue/${key}`) ?? "";
-}
-
-export async function setConfigValue(key: string, value: string): Promise<void> {
-  if (await ensureTauri()) {
-    await tauriInvoke!("set_config_value", { key, value });
+    await tauriInvoke!("reset_config");
     return;
   }
-  if (value) localStorage.setItem(`configValue/${key}`, value);
-  else localStorage.removeItem(`configValue/${key}`);
+  localStorage.removeItem("myriad-mind-config");
+}
+
+// ---- 打开外部链接（注册页等，调系统浏览器）----
+
+export async function openExternalUrl(url: string): Promise<void> {
+  if (await ensureTauri()) {
+    try {
+      // 官方插件 API（内部 invoke plugin:opener|open_url，已正确处理命令名/权限/scope）
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+      return;
+    } catch (e) {
+      console.warn("[myriad-mind] openUrl 失败，回退 window.open", e);
+    }
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 

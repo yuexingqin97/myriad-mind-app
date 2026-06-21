@@ -1752,7 +1752,7 @@ async fn resolve_via_ai_douyin(video_url: &str, temp_dir: &std::path::Path) -> R
             log::warn!("[douyin] ai_douyin_api_key not found in config file");
             return Err(AppError::Ai {
                 kind: "provider_not_configured".into(),
-                message: "未配置 AI Douyin API Key。请在设置 → API 密钥 中配置 ai_douyin_api_key。aidouyin.com 注册获取免费额度。".into(),
+                message: "未配置 AI Douyin API Key。请在设置 → API 密钥 中配置 ai_douyin_api_key。ai-douyin.top9.cc 注册获取免费额度。".into(),
             });
         }
     };

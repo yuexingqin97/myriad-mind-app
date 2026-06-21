@@ -78,41 +78,6 @@ pub fn read_config_value(key: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// 读取单个字段（前端 Tauri 命令）
-#[tauri::command]
-pub async fn get_config_value(key: String) -> Result<Option<String>, AppError> {
-    Ok(read_config_value(&key))
-}
-
-/// 写入单个字段（读改写，原子写入）— 前端保存 API Key 用
-#[tauri::command]
-pub async fn set_config_value(key: String, value: String) -> Result<(), AppError> {
-    let dir = config_dir();
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| AppError::Config(format!("创建配置目录失败: {e}")))?;
-
-    let path = config_file();
-    let mut json: serde_json::Value = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-
-    // 顶层必须是对象
-    if !json.is_object() {
-        json = serde_json::json!({});
-    }
-    json.as_object_mut()
-        .unwrap()
-        .insert(key, serde_json::Value::String(value));
-
-    let tmp = dir.join("config.json.tmp");
-    let content =
-        serde_json::to_string_pretty(&json).map_err(|e| AppError::Config(format!("序列化失败: {e}")))?;
-    std::fs::write(&tmp, &content).map_err(|e| AppError::Config(format!("写入配置失败: {e}")))?;
-    std::fs::rename(&tmp, &path).map_err(|e| AppError::Config(format!("保存配置失败: {e}")))?;
-    Ok(())
-}
-
 /// 读取配置（无文件时返回空对象）
 #[tauri::command]
 pub async fn read_config() -> Result<String, AppError> {

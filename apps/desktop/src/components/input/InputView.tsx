@@ -15,14 +15,14 @@ interface InputViewProps {
 // ---- Platform display helpers ----
 
 const PLATFORM_META: Record<string, { icon: string; label: string; color: string }> = {
-  bilibili:     { icon: "📺", label: "B 站",       color: "#fb7299" },
-  youtube:      { icon: "▶️", label: "YouTube",    color: "#ff4444" },
-  douyin:       { icon: "🎵", label: "抖音",       color: "#111" },
-  xiaohongshu:  { icon: "📕", label: "小红书",     color: "#ff2442" },
-  article_url:  { icon: "📄", label: "文章",       color: "var(--brand-primary)" },
-  local_video:  { icon: "🎬", label: "本地视频",   color: "#a855f7" },
-  local_audio:  { icon: "🎵", label: "本地音频",   color: "#a855f7" },
-  local_text:   { icon: "📝", label: "本地文档",   color: "#a855f7" },
+  bilibili: { icon: "📺", label: "B 站", color: "#fb7299" },
+  youtube: { icon: "▶️", label: "YouTube", color: "#ff4444" },
+  douyin: { icon: "🎵", label: "抖音", color: "#111" },
+  xiaohongshu: { icon: "📕", label: "小红书", color: "#ff2442" },
+  article_url: { icon: "📄", label: "文章", color: "var(--brand-primary)" },
+  local_video: { icon: "🎬", label: "本地视频", color: "#a855f7" },
+  local_audio: { icon: "🎵", label: "本地音频", color: "#a855f7" },
+  local_text: { icon: "📝", label: "本地文档", color: "#a855f7" },
 };
 
 /** 平台名 → meta fallback（classify.platform 返回的是中文名） */

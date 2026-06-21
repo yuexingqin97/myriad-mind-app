@@ -27,7 +27,7 @@ export type {
 
 // ConfigWizard (首次启动引导)
 export { ConfigWizard } from "./ConfigWizard.js";
-export type { ConfigWizardProps, KeychainApi } from "./ConfigWizard.js";
+export type { ConfigWizardProps } from "./ConfigWizard.js";
 
 // SettingsPage (常规设置页)
 export { SettingsPage } from "./SettingsPage.js";

@@ -1,9 +1,11 @@
 // ============================================================
 // SettingsPage — 左-右双栏设置页
 // 顶部健康度卡片 + 左侧导航 + 右侧内容
+// 保存策略：修改后 debounce 自动保存（无手动按钮）
 // ============================================================
 
 import { useState, useEffect } from "react";
+import type React from "react";
 import type { MyriadMindConfig } from "@myriad-mind/core";
 import { Input, Select, Toggle } from "./common/Input.js";
 import { Button } from "./common/Button.js";
@@ -13,8 +15,8 @@ export type ThemeMode = "light" | "dark" | "system";
 
 export interface SettingsPageProps {
   config: MyriadMindConfig;
-  onSave: (config: MyriadMindConfig) => void;
-  keychain?: KeychainApi;
+  /** 配置字段变更（直接改 App 内存 config，由 useConfig debounce 自动写盘） */
+  update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
   /** 系统依赖状态 */
   deps?: DepsInfo;
   /** 重新检测依赖回调 */
@@ -39,12 +41,8 @@ export interface SettingsPageProps {
   appIcon?: string;
   /** 测试 AI 连接回调 */
   onTestAiConnection?: () => Promise<string>;
-}
-
-export interface KeychainApi {
-  check(service: string): Promise<boolean>;
-  read(service: string): Promise<string>;
-  store(service: string, secret: string): Promise<void>;
+  /** 打开外部链接（注册页等，调系统浏览器） */
+  onOpenUrl?: (url: string) => void;
 }
 
 type TabId = "overview" | "keys" | "processing" | "output" | "features" | "advanced" | "about";
@@ -62,9 +60,8 @@ const TABS: Array<{ id: TabId; label: string; icon: string }> = [
 // ============================================================
 
 export function SettingsPage({
-  config: initialConfig,
-  onSave,
-  keychain,
+  config,
+  update,
   deps,
   onRecheckDeps,
   onOpenWizard,
@@ -77,23 +74,11 @@ export function SettingsPage({
   onThemeChange,
   appIcon,
   onTestAiConnection,
+  onOpenUrl,
 }: SettingsPageProps) {
   const [tab, setTab] = useState<TabId>("overview");
-  const [config, setConfig] = useState<MyriadMindConfig>({ ...initialConfig });
-  const [saved, setSaved] = useState(false);
-
-  const update = <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => {
-    setConfig((c) => ({ ...c, [key]: value }));
-    setSaved(false);
-  };
-
-  const handleSave = () => {
-    onSave(config);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  // ---- Health status derivation ----
+  // config / update 由父级 useConfig 提供：改动即时进 App 内存 config，
+  // 由 useConfig 的 debounce effect 自动写盘 —— 切到向导/其他视图时不会丢失未保存的改动。
 
   return (
     <div className="settings-page-full" style={{ position: "relative" }}>
@@ -116,7 +101,7 @@ export function SettingsPage({
         {/* 右侧内容 */}
         <div className="settings-content-right">
           {tab === "overview" && <OverviewTab onRecheckDeps={onRecheckDeps} onOpenWizard={onOpenWizard} onResetConfig={onResetConfig} theme={theme} onThemeChange={onThemeChange} onTestAiConnection={onTestAiConnection} />}
-          {tab === "keys" && <KeysTab keychain={keychain} config={config} update={update} />}
+          {tab === "keys" && <KeysTab config={config} update={update} onOpenUrl={onOpenUrl} />}
           {tab === "processing" && <ProcessingTab config={config} update={update} deps={deps} />}
           {tab === "output" && <OutputTab config={config} update={update} onSelectDir={onSelectOutputDir} onOpenDir={onOpenOutputDir} onOpenCacheDir={onOpenCacheDir} />}
           {tab === "features" && <FeaturesTab config={config} update={update} />}
@@ -125,18 +110,6 @@ export function SettingsPage({
         </div>
       </div>
 
-      {/* 右上角保存按钮 */}
-      <div style={{
-        position: "absolute", top: 8, right: 16, zIndex: 100,
-        display: "flex", alignItems: "center", gap: 8,
-      }}>
-        {saved && (
-          <span style={{ fontSize: 11, color: "#4ade80" }}>✅ 已保存</span>
-        )}
-        <Button size="sm" onClick={handleSave}>
-          {saved ? "✅ 已保存" : "💾 保存设置"}
-        </Button>
-      </div>
     </div>
   );
 }
@@ -245,11 +218,11 @@ function OverviewTab({
 // ============================================================
 
 function KeysTab({
-  keychain, config, update,
+  config, update, onOpenUrl,
 }: {
-  keychain?: KeychainApi;
   config: MyriadMindConfig;
   update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
+  onOpenUrl?: (url: string) => void;
 }) {
   return (
     <>
@@ -284,40 +257,31 @@ function KeysTab({
         <ConfigKeyInput label="DeepSeek API Key"
           desc="platform.deepseek.com → API Keys" placeholder="sk-..."
           value={config.deepseek_api_key ?? ""}
-          onChange={(v) => update("deepseek_api_key", v)} />
-
-        <details style={{ fontSize: 11, color: "var(--text-muted, #666)", marginTop: 8 }}>
-          <summary style={{ cursor: "pointer" }}>Claude API Key（可选 · 后续版本）</summary>
-          <div style={{ marginTop: 8 }}>
-            <KeyField service="claude-api-key" label="Claude API Key"
-              desc="Anthropic 控制台 → API Keys · v2 备用" placeholder="sk-ant-api03-..."
-              required={false} keychain={keychain} />
-          </div>
-        </details>
+          onChange={(v) => update("deepseek_api_key", v)}
+          link={{ url: "https://platform.deepseek.com/api_keys", label: "前往 DeepSeek 控制台 ↗" }}
+          onOpenUrl={onOpenUrl} />
       </SettingsSection>
 
-      <SettingsSection title="📡 视频解析 & ASR 服务">
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <ConfigKeyInput label="AI Douyin API Key"
-            desc="B站/抖音/小红书视频解析。aidouyin.com 注册获取" placeholder="输入 Key..."
-            value={config.ai_douyin_api_key ?? ""}
-            onChange={(v) => update("ai_douyin_api_key", v)} />
-          <KeyField service="tikhub-token" label="TikHub Token"
-            desc="视频解析备用方案。tikhub.io 注册获取" placeholder="输入 Token..." required={false} keychain={keychain} />
-          <KeyField service="volcengine-token" label="火山引擎 Token"
-            desc="云端 ASR 后端 Token" placeholder="输入 Token..." required={false} keychain={keychain} />
-        </div>
+      <SettingsSection title="📡 视频解析服务">
+        <ConfigKeyInput label="AI Douyin API Key"
+          desc="B站/抖音/小红书视频解析。ai-douyin.top9.cc 注册获取" placeholder="输入 Key..."
+          value={config.ai_douyin_api_key ?? ""}
+          onChange={(v) => update("ai_douyin_api_key", v)}
+          link={{ url: "https://ai-douyin.top9.cc/", label: "前往 ai-douyin.top9.cc ↗" }}
+          onOpenUrl={onOpenUrl} />
       </SettingsSection>
     </>
   );
 }
 
-/** 写入配置文件的 Key 输入框（自动保存） */
+/** 受控 Key 输入框（修改后随设置页 debounce 自动保存到 ~/.myriad-mind-app/config.json） */
 function ConfigKeyInput({
-  label, desc, placeholder, value, onChange,
+  label, desc, placeholder, value, onChange, link, onOpenUrl,
 }: {
   label: string; desc: string; placeholder: string;
   value: string; onChange: (v: string) => void;
+  link?: { url: string; label?: string };
+  onOpenUrl?: (url: string) => void;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -341,6 +305,15 @@ function ConfigKeyInput({
         </button>
       </div>
       <p style={{ fontSize: 10, color: "var(--text-muted, #666)", margin: "0 0 4px" }}>{desc}</p>
+      {link && (
+        <a
+          href={link.url} target="_blank" rel="noopener noreferrer"
+          onClick={onOpenUrl ? (e) => { e.preventDefault(); onOpenUrl(link.url); } : undefined}
+          style={{ fontSize: 10, color: "var(--brand-primary, #1683ff)", textDecoration: "none", display: "inline-block", marginTop: 2 }}
+        >
+          {link.label ?? link.url}
+        </a>
+      )}
       {show && (
         <div style={{ display: "flex", gap: 6 }}>
           <input
@@ -356,80 +329,15 @@ function ConfigKeyInput({
       )}
       {show && !value && (
         <p style={{ fontSize: 9, color: "#facc15", margin: "4px 0 0" }}>
-          ⚠️ 输入后自动保存到配置文件 ~/myriad-mind-config.json
+          ⚠️ 输入后自动保存到 ~/.myriad-mind-app/config.json（明文，请自行保管文件安全）
         </p>
       )}
     </div>
   );
 }
 
-function KeyField({ service, label, desc, placeholder, required, keychain }: {
-  service: string; label: string; desc: string; placeholder: string; required: boolean; keychain?: KeychainApi;
-}) {
-  const [status, setStatus] = useState<"loading" | "set" | "empty">("loading");
-  const [masked, setMasked] = useState("");
-  const [editing, setEditing] = useState(false);
-  const [inputVal, setInputVal] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!keychain) { setStatus("empty"); return; }
-    keychain.check(service).then((exists) => {
-      if (exists) return keychain.read(service).then((s) => { setMasked(maskKey(s)); setStatus("set"); });
-      setStatus("empty");
-    }).catch(() => setStatus("empty"));
-  }, [service, keychain]);
-
-  const handleSave = async () => {
-    if (!inputVal.trim()) return;
-    setSaving(true);
-    try {
-      await keychain?.store(service, inputVal.trim());
-      setMasked(maskKey(inputVal.trim()));
-      setStatus("set"); setEditing(false); setInputVal("");
-    } finally { setSaving(false); }
-  };
-
-  return (
-    <div className={`settings-key-row${status === "set" ? " settings-key-set" : required ? " settings-key-required" : ""}`}>
-      <div className="settings-key-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span className="settings-key-label">{label}</span>
-          {required && <span className="settings-key-badge settings-key-badge-required">必填</span>}
-          {status === "set" && <span className="settings-key-badge settings-key-badge-ok">已配置</span>}
-          {status === "empty" && !required && <span className="settings-key-badge settings-key-badge-optional">可选</span>}
-        </div>
-        {!editing && (
-          <button className="settings-key-edit-btn" onClick={() => setEditing(true)}>
-            {status === "set" ? "编辑" : "配置"}
-          </button>
-        )}
-      </div>
-      <p className="settings-key-desc">{desc}</p>
-      {!editing && status === "set" && (
-        <code className="settings-key-masked">{masked}</code>
-      )}
-      {editing && (
-        <div className="settings-key-edit">
-          <input type="password" value={inputVal} onChange={(e) => setInputVal(e.target.value)}
-            placeholder={placeholder} onKeyDown={(e) => e.key === "Enter" && handleSave()} className="settings-key-input" />
-          <button className="settings-key-save-btn" onClick={handleSave} disabled={!inputVal.trim() || saving}>
-            {saving ? "…" : "保存"}
-          </button>
-          <button className="settings-key-cancel-btn" onClick={() => { setEditing(false); setInputVal(""); }}>取消</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function maskKey(s: string): string {
-  if (!s || s.length <= 16) return "••••••••";
-  return s.slice(0, 8) + "..." + s.slice(-4);
-}
-
 // ============================================================
-// 处理能力 Tab (合并 ASR + 视频 + 依赖)
+// 处理能力 Tab (ASR + 视频 + 依赖)
 // ============================================================
 
 function ProcessingTab({
@@ -480,63 +388,43 @@ function ProcessingTab({
         </SettingsSection>
       )}
 
-      {/* 语音识别 */}
+      {/* 语音识别（固定 faster-whisper 本地转写；云端 ASR 暂未支持） */}
       <SettingsSection title="语音识别">
-        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-          <PillButton active={config.asr.backend === "faster-whisper"} onClick={() => update("asr", {
-            ...config.asr, backend: "faster-whisper",
-            faster_whisper: config.asr.faster_whisper ?? { model_size: "small", device: "auto" },
-          })}>
-            faster-whisper（本地免费）
-          </PillButton>
-          <PillButton active={config.asr.backend === "volcengine"} onClick={() => update("asr", {
-            ...config.asr, backend: "volcengine",
-            volcengine: config.asr.volcengine ?? { token_keyring_id: "volcengine-token", appid: "" },
-          })}>
-            火山引擎（云端付费）
-          </PillButton>
-        </div>
-
-        {config.asr.backend === "faster-whisper" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <Select label="模型大小" value={config.asr.faster_whisper?.model_size ?? "small"}
-              options={[
-                { value: "tiny", label: "tiny — 最小最快" }, { value: "base", label: "base — 基础" },
-                { value: "small", label: "small — 推荐" }, { value: "medium", label: "medium — 准确" },
-                { value: "large-v3", label: "large-v3 — 最准确（需大显存）" },
-              ]}
-              onChange={(e) => update("asr", { ...config.asr, faster_whisper: {
-                model_size: e.target.value as "tiny" | "base" | "small" | "medium" | "large-v3",
-                device: config.asr.faster_whisper?.device ?? "auto",
-                compute_type: config.asr.faster_whisper?.compute_type,
-              }})}
-            />
-            <div>
-              <label style={{ fontSize: 12, color: "var(--text-muted, #666)", marginBottom: 4, display: "block" }}>运行设备</label>
-              <div style={{ display: "flex", gap: 6 }}>
-                {(["auto", "cpu", "cuda"] as const).map((d) => (
-                  <PillButton key={d} active={(config.asr.faster_whisper?.device ?? "auto") === d}
-                    onClick={() => update("asr", { ...config.asr, faster_whisper: {
-                      model_size: config.asr.faster_whisper?.model_size ?? "small",
-                      device: d, compute_type: config.asr.faster_whisper?.compute_type,
-                    }})}>
-                    {d === "auto" ? "自动检测" : d === "cpu" ? "CPU" : "CUDA (GPU)"}
-                  </PillButton>
-                ))}
-              </div>
-            </div>
+        <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "0 0 10px" }}>
+          使用 faster-whisper 本地转写（免费、离线）。云端 ASR（火山引擎）暂未接入。
+        </p>
+        <Select label="模型大小" value={config.asr.faster_whisper?.model_size ?? "small"}
+          options={[
+            { value: "tiny", label: "tiny — 最小最快" }, { value: "base", label: "base — 基础" },
+            { value: "small", label: "small — 推荐" }, { value: "medium", label: "medium — 准确" },
+            { value: "large-v3", label: "large-v3 — 最准确（需大显存）" },
+          ]}
+          onChange={(e) => update("asr", {
+            backend: "faster-whisper",
+            faster_whisper: {
+              model_size: e.target.value as "tiny" | "base" | "small" | "medium" | "large-v3",
+              device: config.asr.faster_whisper?.device ?? "auto",
+              compute_type: config.asr.faster_whisper?.compute_type,
+            },
+          })}
+        />
+        <div>
+          <label style={{ fontSize: 12, color: "var(--text-muted, #666)", marginBottom: 4, display: "block" }}>运行设备</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            {(["auto", "cpu", "cuda"] as const).map((d) => (
+              <PillButton key={d} active={(config.asr.faster_whisper?.device ?? "auto") === d}
+                onClick={() => update("asr", {
+                  backend: "faster-whisper",
+                  faster_whisper: {
+                    model_size: config.asr.faster_whisper?.model_size ?? "small",
+                    device: d, compute_type: config.asr.faster_whisper?.compute_type,
+                  },
+                })}>
+                {d === "auto" ? "自动检测" : d === "cpu" ? "CPU" : "CUDA (GPU)"}
+              </PillButton>
+            ))}
           </div>
-        )}
-
-        {config.asr.backend === "volcengine" && (
-          <Input
-            label="App ID"
-            value={config.asr.volcengine?.appid ?? ""}
-            placeholder="火山引擎控制台 → 语音技术 → 应用 ID"
-            hint="Token 请在「API 密钥」标签页配置"
-            onChange={(e) => update("asr", { ...config.asr, volcengine: { token_keyring_id: "volcengine-token", appid: e.target.value } })}
-          />
-        )}
+        </div>
       </SettingsSection>
 
       {/* 视频解析 */}
@@ -550,7 +438,7 @@ function ProcessingTab({
           </PillButton>
         </div>
         <p style={{ fontSize: 11, color: "var(--text-muted, #666)" }}>
-          抖音/小红书/B 站视频解析需要 API Key（在「API 密钥」标签页配置）。YouTube 不需要额外 Key。
+          抖音/小红书/B 站视频解析需要 AI Douyin API Key（在「API 密钥」标签页配置）。YouTube 不需要额外 Key。
         </p>
       </SettingsSection>
     </>
@@ -604,7 +492,7 @@ function OutputTab({
 
       <SettingsSection title="文件管理">
         <Toggle label="自动清理临时文件"
-          description="处理完成后删除 /tmp 中的视频、音频、字幕、截图"
+          description="处理完成后删除 /tmp 中的视频、音频、字幕、截图。关闭此项可保留缓存视频（调试用）"
           checked={config.output.cleanup_temp}
           onChange={(v) => update("output", { ...config.output, cleanup_temp: v })} />
         {onOpenCacheDir && (
@@ -763,21 +651,23 @@ function AdvancedTab({
       </SettingsSection>
 
       <SettingsSection title="ASR 高级参数">
-        {config.asr.backend === "faster-whisper" && (
-          <Select
-            label="compute_type"
-            options={[
-              { value: "default", label: "default — 自动" },
-              { value: "float16", label: "float16" },
-              { value: "int8", label: "int8 — 量化加速" },
-            ]}
-            value={config.asr.faster_whisper?.compute_type ?? "default"}
-            onChange={(e) => update("asr", { ...config.asr, faster_whisper: {
-              ...config.asr.faster_whisper!,
+        <Select
+          label="compute_type"
+          options={[
+            { value: "default", label: "default — 自动" },
+            { value: "float16", label: "float16" },
+            { value: "int8", label: "int8 — 量化加速" },
+          ]}
+          value={config.asr.faster_whisper?.compute_type ?? "default"}
+          onChange={(e) => update("asr", {
+            backend: "faster-whisper",
+            faster_whisper: {
+              model_size: config.asr.faster_whisper?.model_size ?? "small",
+              device: config.asr.faster_whisper?.device ?? "auto",
               compute_type: e.target.value as "default" | "float16" | "int8",
-            }})}
-          />
-        )}
+            },
+          })}
+        />
       </SettingsSection>
 
       <SettingsSection title="收尾操作">

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { type MyriadMindConfig } from "@myriad-mind/core";
-import { ConfigWizard, SettingsPage, type KeychainApi, type DepsInfo, type ThemeMode } from "@myriad-mind/ui";
+import { ConfigWizard, SettingsPage, type DepsInfo, type ThemeMode } from "@myriad-mind/ui";
 import * as api from "@/api";
 import type { DepResult } from "@/api";
 
@@ -12,8 +12,8 @@ import appIcon from "@/assets/icons/myriad-mind-whale-icon-concept.png";
 interface SettingsViewProps {
   config: MyriadMindConfig;
   onSave: (c: MyriadMindConfig) => void;
-  /** API Key 单独保存后，重新从 config.json 加载同步 state */
-  reloadConfig: () => Promise<void>;
+  /** 设置页字段变更（直接改 App 内存 config，useConfig debounce 自动写盘） */
+  update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
   firstLaunch: boolean;
   onFinishWizard: () => void;
   /** 导航到炼化页（完成向导后） */
@@ -29,7 +29,7 @@ function toDepInfo(d: DepResult | undefined) {
 
 // ---- Component ----
 
-export function SettingsView({ config, onSave, reloadConfig, firstLaunch, onFinishWizard, onNavigateToInput }: SettingsViewProps) {
+export function SettingsView({ config, onSave, update, firstLaunch, onFinishWizard, onNavigateToInput }: SettingsViewProps) {
   const [showWizard, setShowWizard] = useState(firstLaunch);
   const [deps, setDeps] = useState<DepsInfo | undefined>(undefined);
   const { theme, setTheme } = useTheme();
@@ -52,24 +52,21 @@ export function SettingsView({ config, onSave, reloadConfig, firstLaunch, onFini
     detectDeps();
   }, [detectDeps]);
 
-  // Keychain adapter
-  const keychainAdapter: KeychainApi = React.useMemo(() => {
-    // service 名 → config.json 字段名（连字符转下划线：deepseek-api-key → deepseek_api_key）
-    const fieldOf = (service: string) => service.replace(/-/g, "_");
-    return {
-      async check(service: string) {
-        const v = await api.getConfigValue(fieldOf(service));
-        return !!v && v.trim() !== "";
-      },
-      async read(service: string) {
-        return api.getConfigValue(fieldOf(service));
-      },
-      async store(service: string, secret: string) {
-        await api.setConfigValue(fieldOf(service), secret);
-        await reloadConfig(); // 同步 config state，避免后续全量保存覆盖
-      },
-    };
-  }, [reloadConfig]);
+  // 重置配置：删除 config.json，下次启动重新进入首启引导
+  const handleResetConfig = useCallback(async () => {
+    if (!window.confirm("确定重置配置？将删除 ~/.myriad-mind-app/config.json，下次启动重新进入配置向导。")) return;
+    try {
+      await api.resetConfig();
+      window.location.reload();
+    } catch (e) {
+      window.alert(`重置失败：${e}`);
+    }
+  }, []);
+
+  // 打开外部链接（注册页等，调系统浏览器）
+  const handleOpenUrl = useCallback((url: string) => {
+    api.openExternalUrl(url);
+  }, []);
 
   return (
     <div className="view-container">
@@ -88,21 +85,21 @@ export function SettingsView({ config, onSave, reloadConfig, firstLaunch, onFini
             }
           }}
           onCancel={() => { setShowWizard(false); onFinishWizard(); }}
-          keychain={keychainAdapter}
           deps={deps}
           onRecheckDeps={detectDeps}
           onSelectOutputDir={async () => api.pickFolder()}
           onOpenOutputDir={() => { /* TBD */ }}
+          onOpenUrl={handleOpenUrl}
         />
       ) : (
         <>
           <SettingsPage
             config={config}
-            onSave={onSave}
-            keychain={keychainAdapter}
+            update={update}
             deps={deps}
             onRecheckDeps={detectDeps}
             onOpenWizard={() => setShowWizard(true)}
+            onResetConfig={handleResetConfig}
             onSelectOutputDir={async () => api.pickFolder()}
             onOpenOutputDir={() => { /* TBD: open in explorer */ }}
             onOpenCacheDir={() => api.openCacheDir()}
@@ -110,6 +107,7 @@ export function SettingsView({ config, onSave, reloadConfig, firstLaunch, onFini
             onThemeChange={setTheme}
             appIcon={appIcon}
             onTestAiConnection={async () => api.testDeepSeekConnection()}
+            onOpenUrl={handleOpenUrl}
           />
         </>
       )}

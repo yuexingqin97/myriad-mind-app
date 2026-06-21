@@ -1,6 +1,7 @@
 // ============================================================
 // ConfigWizard — 多步骤配置引导
 // 新步骤: welcome → deps → keys → processing → output → features → review
+// 保存策略：每步只改 local state，最后一步「完成并保存」统一落盘
 // ============================================================
 
 import React, { useState } from "react";
@@ -15,8 +16,6 @@ export interface ConfigWizardProps {
   /** 保存回调 — action: "go_input" 跳转炼化页, "stay_settings" 留在设置 */
   onSave: (config: MyriadMindConfig, action: "go_input" | "stay_settings") => void;
   onCancel?: () => void;
-  /** 密钥链操作接口 */
-  keychain?: KeychainApi;
   /** 系统依赖状态 */
   deps?: DepsInfo;
   /** 重新检测依赖回调 */
@@ -25,12 +24,8 @@ export interface ConfigWizardProps {
   onSelectOutputDir?: () => Promise<string | null>;
   /** 打开输出目录 */
   onOpenOutputDir?: () => void;
-}
-
-export interface KeychainApi {
-  check(service: string): Promise<boolean>;
-  read(service: string): Promise<string>;
-  store(service: string, secret: string): Promise<void>;
+  /** 打开外部链接（注册页等，调系统浏览器） */
+  onOpenUrl?: (url: string) => void;
 }
 
 type StepId = "welcome" | "deps" | "keys" | "processing" | "output" | "features" | "review";
@@ -64,11 +59,11 @@ export function ConfigWizard({
   config: initialConfig,
   onSave,
   onCancel,
-  keychain,
   deps,
   onRecheckDeps,
   onSelectOutputDir,
   onOpenOutputDir,
+  onOpenUrl,
 }: ConfigWizardProps) {
   const [step, setStep] = useState(0);
   const [config, setConfig] = useState<MyriadMindConfig>({ ...initialConfig });
@@ -149,11 +144,11 @@ export function ConfigWizard({
       <div style={{ minHeight: 300 }}>
         {step === 0 && <WelcomeStep intent={setupIntent} onChange={setSetupIntent} />}
         {step === 1 && <DepsStep deps={deps} intent={setupIntent} onRecheck={onRecheckDeps} />}
-        {step === 2 && <ApiKeysStep keychain={keychain} />}
+        {step === 2 && <ApiKeysStep config={config} update={update} onOpenUrl={onOpenUrl} />}
         {step === 3 && <ProcessingStep config={config} update={update} intent={setupIntent} />}
         {step === 4 && <OutputStep config={config} update={update} onSelectDir={onSelectOutputDir} />}
         {step === 5 && <FeaturesStep config={config} update={update} />}
-        {step === 6 && <ReviewStep config={config} intent={setupIntent} deps={deps} keychain={keychain} />}
+        {step === 6 && <ReviewStep config={config} intent={setupIntent} deps={deps} />}
       </div>
     </Card>
   );
@@ -345,7 +340,7 @@ function DepsStep({ deps, intent, onRecheck }: { deps?: DepsInfo; intent: SetupI
 }
 
 // ============================================================
-// Step 2: Keys — API 密钥 (保留现有逻辑)
+// Step 2: Keys — API 密钥（受控，最后一步统一保存）
 // ============================================================
 
 // ---- AI 模型提供商 ----
@@ -355,29 +350,13 @@ const AI_PROVIDERS = [
   { id: "claude", label: "Claude", desc: "Anthropic · 待后续版本支持", available: false },
 ] as const;
 
-// ---- 视频/ASR 密钥 ----
-
-const SERVICE_KEYS: Array<{
-  service: string; label: string; description: string; placeholder: string; required: boolean;
-}> = [
-  {
-    service: "ai-douyin-api-key", label: "AI Douyin API Key",
-    description: "抖音/B 站/小红书视频解析。aidouyin.com 注册获取",
-    placeholder: "输入 AI Douyin API Key...", required: false,
-  },
-  {
-    service: "tikhub-token", label: "TikHub Token",
-    description: "视频解析备用方案。tikhub.io 注册获取",
-    placeholder: "输入 TikHub Token...", required: false,
-  },
-  {
-    service: "volcengine-token", label: "火山引擎 Token",
-    description: "云端 ASR 后端。火山引擎控制台 → 语音技术 → 获取 Token",
-    placeholder: "输入火山引擎 Token...", required: false,
-  },
-];
-
-function ApiKeysStep({ keychain }: { keychain?: KeychainApi }) {
+function ApiKeysStep({
+  config, update, onOpenUrl,
+}: {
+  config: MyriadMindConfig;
+  update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
+  onOpenUrl?: (url: string) => void;
+}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* AI 模型选择 */}
@@ -412,86 +391,65 @@ function ApiKeysStep({ keychain }: { keychain?: KeychainApi }) {
             </div>
           ))}
         </div>
-        {/* DeepSeek API Key */}
+        {/* DeepSeek API Key（必填，受控） */}
         <ApiKeyField
-          service="deepseek-api-key"
           label="DeepSeek API Key"
           description="platform.deepseek.com → API Keys · 必填"
           placeholder="sk-..."
           required
-          keychain={keychain}
+          value={config.deepseek_api_key ?? ""}
+          onChange={(v) => update("deepseek_api_key", v)}
+          link={{ url: "https://platform.deepseek.com/api_keys", label: "前往 DeepSeek 控制台 ↗" }}
+          onOpenUrl={onOpenUrl}
         />
-        {/* Claude API Key (hidden for now, keep keychain entry) */}
-        <div style={{ marginTop: 8 }}>
-          <details style={{ fontSize: 12, color: "var(--text-muted, #666)" }}>
-            <summary style={{ cursor: "pointer" }}>Claude API Key（可选 · 后续版本）</summary>
-            <div style={{ marginTop: 8 }}>
-              <ApiKeyField
-                service="claude-api-key"
-                label="Claude API Key"
-                description="Anthropic 控制台 → API Keys · v2 备用方案"
-                placeholder="sk-ant-api03-..."
-                required={false}
-                keychain={keychain}
-              />
-            </div>
-          </details>
-        </div>
       </div>
 
-      {/* 视频/ASR 密钥 */}
+      {/* 视频解析服务 */}
       <div>
         <h4 style={{ fontSize: 14, fontWeight: 600, color: "var(--text, #e0e0f0)", marginBottom: 12 }}>
-          📡 视频解析 & ASR 服务
+          📡 视频解析服务
         </h4>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {SERVICE_KEYS.map((def) => (
-            <ApiKeyField key={def.service} {...def} keychain={keychain} />
-          ))}
-        </div>
+        <ApiKeyField
+          label="AI Douyin API Key"
+          description="抖音/B 站/小红书视频解析。ai-douyin.top9.cc 注册获取"
+          placeholder="输入 AI Douyin API Key..."
+          required={false}
+          value={config.ai_douyin_api_key ?? ""}
+          onChange={(v) => update("ai_douyin_api_key", v)}
+          link={{ url: "https://ai-douyin.top9.cc/", label: "前往 ai-douyin.top9.cc ↗" }}
+          onOpenUrl={onOpenUrl}
+        />
       </div>
     </div>
   );
 }
 
+/** 受控 API Key 输入（编辑/确认/删除都改 config state，由向导最后一步统一保存） */
 function ApiKeyField({
-  service, label, description, placeholder, required, keychain,
+  label, description, placeholder, required, value, onChange, link, onOpenUrl,
 }: {
-  service: string; label: string; description: string; placeholder: string; required: boolean; keychain?: KeychainApi;
+  label: string; description: string; placeholder: string; required: boolean;
+  value: string; onChange: (v: string) => void;
+  link?: { url: string; label?: string };
+  onOpenUrl?: (url: string) => void;
 }) {
-  const [status, setStatus] = useState<"loading" | "set" | "empty">("loading");
-  const [masked, setMasked] = useState("");
   const [editing, setEditing] = useState(false);
-  const [inputValue, setInputValue] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
 
-  React.useEffect(() => {
-    if (!keychain) { setStatus("empty"); return; }
-    keychain.check(service).then((exists) => {
-      if (exists) return keychain.read(service).then((secret) => {
-        setMasked(maskSecret(secret)); setStatus("set");
-      });
-      setStatus("empty");
-    }).catch(() => setStatus("empty"));
-  }, [service, keychain]);
+  const masked = maskSecret(value);
+  const status: "set" | "empty" = value ? "set" : "empty";
 
-  const handleSave = async () => {
-    if (!inputValue.trim()) return;
-    setSaving(true); setError(null);
-    try {
-      await keychain?.store(service, inputValue.trim());
-      setMasked(maskSecret(inputValue.trim()));
-      setStatus("set"); setEditing(false); setInputValue("");
-    } catch (e) { setError(String(e)); }
-    finally { setSaving(false); }
+  const confirm = () => {
+    if (!draft.trim()) return;
+    onChange(draft.trim());
+    setDraft("");
+    setEditing(false);
   };
 
-  const handleDelete = async () => {
-    try {
-      await keychain?.store(service, "");
-      setStatus("empty"); setMasked(""); setEditing(false);
-    } catch (e) { setError(String(e)); }
+  const remove = () => {
+    onChange("");
+    setEditing(false);
+    setDraft("");
   };
 
   return (
@@ -518,26 +476,34 @@ function ApiKeyField({
         )}
       </div>
       <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "0 0 4px" }}>{description}</p>
+      {link && (
+        <a
+          href={link.url} target="_blank" rel="noopener noreferrer"
+          onClick={onOpenUrl ? (e) => { e.preventDefault(); onOpenUrl(link.url); } : undefined}
+          style={{ fontSize: 11, color: "var(--brand-primary, #1683ff)", textDecoration: "none", display: "inline-block", marginBottom: 4 }}
+        >
+          {link.label ?? link.url}
+        </a>
+      )}
       {!editing && status === "set" && (
         <p style={{ fontSize: 12, color: "var(--text-secondary, #aaa)", fontFamily: "monospace", margin: 0 }}>{masked}</p>
       )}
       {editing && (
         <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="password" value={inputValue} onChange={(e) => setInputValue(e.target.value)}
-            placeholder={placeholder} onKeyDown={(e) => e.key === "Enter" && handleSave()}
+          <input type="password" value={draft} onChange={(e) => setDraft(e.target.value)}
+            placeholder={placeholder} onKeyDown={(e) => e.key === "Enter" && confirm()} autoFocus
             style={{ flex: 1, padding: "6px 10px", fontSize: 12, borderRadius: 6, border: "1px solid var(--border, #333)", background: "var(--bg-app, #111)", color: "var(--text, #eee)", outline: "none" }} />
-          <button onClick={handleSave} disabled={!inputValue.trim() || saving} style={{
-            padding: "6px 12px", fontSize: 11, borderRadius: 6, border: "none", background: "var(--brand-primary)", color: "white", cursor: inputValue.trim() ? "pointer" : "not-allowed", opacity: inputValue.trim() ? 1 : 0.5,
-          }}>{saving ? "…" : "保存"}</button>
+          <button onClick={confirm} disabled={!draft.trim()} style={{
+            padding: "6px 12px", fontSize: 11, borderRadius: 6, border: "none", background: "var(--brand-primary)", color: "white", cursor: draft.trim() ? "pointer" : "not-allowed", opacity: draft.trim() ? 1 : 0.5,
+          }}>保存</button>
           {status === "set" && (
-            <button onClick={handleDelete} style={{ padding: "6px 12px", fontSize: 11, borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)", background: "transparent", color: "#f87171", cursor: "pointer" }}>删除</button>
+            <button onClick={remove} style={{ padding: "6px 12px", fontSize: 11, borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)", background: "transparent", color: "#f87171", cursor: "pointer" }}>删除</button>
           )}
-          <button onClick={() => { setEditing(false); setInputValue(""); setError(null); }} style={{
+          <button onClick={() => { setEditing(false); setDraft(""); }} style={{
             padding: "6px 12px", fontSize: 11, borderRadius: 6, border: "1px solid var(--border, #333)", background: "transparent", color: "var(--text-secondary, #aaa)", cursor: "pointer",
           }}>取消</button>
         </div>
       )}
-      {error && <p style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>{error}</p>}
     </div>
   );
 }
@@ -564,75 +530,57 @@ function ProcessingStep({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* ASR 配置 */}
+      {/* ASR 配置（固定 faster-whisper 本地转写；云端 ASR 暂未支持） */}
       <div>
         <h4 style={{ fontSize: 13, fontWeight: 600, color: "var(--text, #e0e0f0)", marginBottom: 10 }}>
           🎙️ 语音识别
         </h4>
-        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-          <Pill active={config.asr.backend === "faster-whisper"} onClick={() => update("asr", {
-            ...config.asr, backend: "faster-whisper",
-            faster_whisper: config.asr.faster_whisper ?? { model_size: "small", device: "auto" },
-          })}>
-            faster-whisper（本地免费）
-          </Pill>
-          <Pill active={config.asr.backend === "volcengine"} onClick={() => update("asr", {
-            ...config.asr, backend: "volcengine",
-            volcengine: config.asr.volcengine ?? { token_keyring_id: "volcengine-token", appid: "" },
-          })}>
-            火山引擎（云端付费）
-          </Pill>
-        </div>
-
-        {config.asr.backend === "faster-whisper" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 4 }}>
-            <button onClick={() => setShowAsrAdvanced(!showAsrAdvanced)} style={{
-              background: "none", border: "none", color: "var(--brand-hover, var(--brand-hover))", fontSize: 12, cursor: "pointer", padding: 0, textAlign: "left",
-            }}>
-              {showAsrAdvanced ? "▾ 收起高级选项" : "▸ 展开高级选项（模型/设备）"}
-            </button>
-            {showAsrAdvanced && (
-              <>
-                <Select label="模型大小" value={config.asr.faster_whisper?.model_size ?? "small"}
-                  options={[
-                    { value: "tiny", label: "tiny — 最小最快" },
-                    { value: "base", label: "base — 基础" },
-                    { value: "small", label: "small — 推荐" },
-                    { value: "medium", label: "medium — 准确" },
-                    { value: "large-v3", label: "large-v3 — 最准确（需大显存）" },
-                  ]}
-                  onChange={(e) => update("asr", { ...config.asr, faster_whisper: {
+        <p style={{ fontSize: 11, color: "var(--text-muted, #666)", marginBottom: 10 }}>
+          使用 faster-whisper 本地转写（免费、离线）。云端 ASR（火山引擎）暂未接入。
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 4 }}>
+          <button onClick={() => setShowAsrAdvanced(!showAsrAdvanced)} style={{
+            background: "none", border: "none", color: "var(--brand-hover, var(--brand-hover))", fontSize: 12, cursor: "pointer", padding: 0, textAlign: "left",
+          }}>
+            {showAsrAdvanced ? "▾ 收起高级选项" : "▸ 展开高级选项（模型/设备）"}
+          </button>
+          {showAsrAdvanced && (
+            <>
+              <Select label="模型大小" value={config.asr.faster_whisper?.model_size ?? "small"}
+                options={[
+                  { value: "tiny", label: "tiny — 最小最快" },
+                  { value: "base", label: "base — 基础" },
+                  { value: "small", label: "small — 推荐" },
+                  { value: "medium", label: "medium — 准确" },
+                  { value: "large-v3", label: "large-v3 — 最准确（需大显存）" },
+                ]}
+                onChange={(e) => update("asr", {
+                  backend: "faster-whisper",
+                  faster_whisper: {
                     model_size: e.target.value as "tiny" | "base" | "small" | "medium" | "large-v3",
                     device: config.asr.faster_whisper?.device ?? "auto",
                     compute_type: config.asr.faster_whisper?.compute_type,
-                  }})}
-                />
-                <div style={{ display: "flex", gap: 6 }}>
-                  {(["auto", "cpu", "cuda"] as const).map((d) => (
-                    <Pill key={d} active={(config.asr.faster_whisper?.device ?? "auto") === d}
-                      onClick={() => update("asr", { ...config.asr, faster_whisper: {
+                  },
+                })}
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                {(["auto", "cpu", "cuda"] as const).map((d) => (
+                  <Pill key={d} active={(config.asr.faster_whisper?.device ?? "auto") === d}
+                    onClick={() => update("asr", {
+                      backend: "faster-whisper",
+                      faster_whisper: {
                         model_size: config.asr.faster_whisper?.model_size ?? "small",
                         device: d,
                         compute_type: config.asr.faster_whisper?.compute_type,
-                      }})}>
-                      {d === "auto" ? "自动检测" : d === "cpu" ? "CPU" : "CUDA"}
-                    </Pill>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {config.asr.backend === "volcengine" && (
-          <Input
-            label="火山引擎 App ID"
-            value={config.asr.volcengine?.appid ?? ""}
-            placeholder="火山引擎控制台 → 语音技术 → 应用 ID"
-            hint="Token 请在「AI 密钥」步骤中配置（存储在 OS 密钥链）"
-            onChange={(e) => update("asr", { ...config.asr, volcengine: { token_keyring_id: "volcengine-token", appid: e.target.value } })}
-          />
-        )}
+                      },
+                    })}>
+                    {d === "auto" ? "自动检测" : d === "cpu" ? "CPU" : "CUDA"}
+                  </Pill>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* 视频解析 */}
@@ -650,7 +598,7 @@ function ProcessingStep({
             </Pill>
           </div>
           <p style={{ fontSize: 11, color: "var(--text-muted, #666)" }}>
-            抖音/小红书/B 站视频解析需要 API Key（在「AI 密钥」步骤配置）。YouTube 不需要额外 Key。
+            抖音/小红书/B 站视频解析需要 AI Douyin API Key（在「AI 密钥」步骤配置）。YouTube 不需要额外 Key。
           </p>
         </div>
       )}
@@ -737,7 +685,7 @@ function OutputStep({
 
       <Toggle
         label="自动清理临时文件"
-        description="处理完成后删除 /tmp 中的视频、音频、字幕、截图"
+        description="处理完成后删除 /tmp 中的视频、音频、字幕、截图。关闭此项可保留缓存视频（调试用）"
         checked={config.output.cleanup_temp}
         onChange={(v) => update("output", { ...config.output, cleanup_temp: v })}
       />
@@ -843,7 +791,6 @@ function ReviewStep({
   config: MyriadMindConfig;
   intent: SetupIntent;
   deps?: DepsInfo;
-  keychain?: KeychainApi;
 }) {
   const intentLabel = { video: "在线视频", local_media: "本地媒体", article: "网页文章", code: "代码项目" }[intent];
 
@@ -854,7 +801,7 @@ function ReviewStep({
   const rows = [
     { label: "使用路径", value: intentLabel },
     { label: "系统依赖", value: depsOk === null ? "未检测" : depsOk ? "全部就绪" : "有缺失项", ok: depsOk },
-    { label: "ASR 后端", value: config.asr.backend === "faster-whisper" ? "faster-whisper（本地）" : "火山引擎（云端）" },
+    { label: "ASR 后端", value: "faster-whisper（本地）" },
     { label: "视频提供商", value: config.video.provider === "ai-douyin" ? "AI Douyin" : "TikHub" },
     { label: "输出目录", value: config.output.note_dir || "❌ 未设置", ok: !!config.output.note_dir },
     { label: "功能开启", value: Object.entries(config.features).filter(([, v]) => v).length + " 项" },

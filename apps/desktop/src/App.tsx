@@ -9,7 +9,7 @@ import "./App.css";
 // ---- App ----
 
 function App() {
-  const { view, setView, config, firstLaunch, finishWizard, saveConfig, reloadConfig } = useConfig();
+  const { view, setView, config, firstLaunch, finishWizard, saveConfig, update } = useConfig();
   useTheme(); // 初始化主题（从 localStorage 读取并应用 data-theme）
 
   return (
@@ -22,7 +22,7 @@ function App() {
           <SettingsView
             config={config}
             onSave={saveConfig}
-            reloadConfig={reloadConfig}
+            update={update}
             firstLaunch={firstLaunch}
             onFinishWizard={finishWizard}
             onNavigateToInput={() => setView("input")}
