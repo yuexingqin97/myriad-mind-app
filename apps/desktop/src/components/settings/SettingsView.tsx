@@ -5,6 +5,7 @@ import * as api from "@/api";
 import type { DepResult } from "@/api";
 
 import { useTheme } from "@/hooks/useTheme";
+import { useLogLevel } from "@/hooks/useLogLevel";
 import appIcon from "@/assets/icons/myriad-mind-whale-icon-concept.png";
 
 // ---- Props ----
@@ -35,6 +36,7 @@ export function SettingsView({ config, onSave, update, setupStatus, firstLaunch,
   const [showWizard, setShowWizard] = useState(firstLaunch);
   const [deps, setDeps] = useState<DepsInfo | undefined>(undefined);
   const { theme, setTheme } = useTheme();
+  const { logLevel, setLogLevel } = useLogLevel();
 
   // Detect deps
   const detectDeps = useCallback(async () => {
@@ -125,6 +127,9 @@ export function SettingsView({ config, onSave, update, setupStatus, firstLaunch,
             appIcon={appIcon}
             onTestAiConnection={async () => api.testDeepSeekConnection()}
             onOpenUrl={handleOpenUrl}
+            logLevel={logLevel}
+            onLogLevelChange={setLogLevel}
+            onOpenLogDir={() => api.openLogDir()}
           />
         </>
       )}

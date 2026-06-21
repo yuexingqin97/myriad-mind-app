@@ -11,11 +11,19 @@ use crate::error::AppError;
 use tauri::AppHandle;
 
 /// 从多处读取 DeepSeek API Key（优先级：环境变量 > 配置文件）
+///
+/// 红线（设计文档 §五）：日志只记「找到/未找到」+ 来源，**绝不**记 key 值本身。
 pub fn read_deepseek_key() -> Result<String, AppError> {
     // 1. 环境变量（最高优先级，CI/容器场景）
     for env_name in &["MYRIAD_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"] {
         if let Ok(key) = std::env::var(env_name) {
             if !key.is_empty() {
+                // 只记来源 + 长度，不记 key 值
+                log::debug!(
+                    target: "agent",
+                    "[engine] key=found source=env name={env_name} key_len={}",
+                    key.len()
+                );
                 return Ok(key);
             }
         }
@@ -23,9 +31,15 @@ pub fn read_deepseek_key() -> Result<String, AppError> {
 
     // 2. 配置文件 ~/.myriad-mind-app/config.json
     if let Some(key) = crate::commands::config::read_config_value("deepseek_api_key") {
+        log::debug!(
+            target: "agent",
+            "[engine] key=found source=config_file key_len={}",
+            key.len()
+        );
         return Ok(key);
     }
 
+    log::warn!(target: "agent", "[engine] key=not_found source=none reason=no_env_and_no_config");
     Err(AppError::Ai {
         kind: "provider_not_configured".into(),
         message: "未找到 DeepSeek API Key。请在设置中配置，或设置环境变量 DEEPSEEK_API_KEY。"
@@ -39,6 +53,15 @@ pub async fn run_mind_task(
     app_handle: AppHandle,
     request: MindRequest,
 ) -> Result<MindResponse, AppError> {
+    // ---- 模型路由埋点（设计文档 §五）：入口侧记录 task + 是否显式 override
+    // 最终选模型（Pro/Flash + reason）的日志在 deepseek.rs::pick_model / stream_deepseek 中。
+    log::debug!(
+        target: "agent",
+        "[engine] phase=enter fn=run_mind_task task={} model_override={} stream={}",
+        request.task,
+        request.model_override.as_deref().unwrap_or("none"),
+        request.stream
+    );
     let api_key = read_deepseek_key()?;
     stream_deepseek(&app_handle, &request, &api_key).await
 }
@@ -76,6 +99,14 @@ pub async fn generate_note(
     // 用 PromptManager 渲染 system prompt（模板文件在 prompts/note/）
     let pm = PromptManager::new()?;
     let mode_key = content_mode_key(content_type);
+    // 模板路由决策埋点：content_type → 哪个 mode_*.md 模板
+    log::debug!(
+        target: "agent",
+        "[engine] phase=route fn=generate_note content_type={content_type:?} mode_key={mode_key} \
+         is_video={is_video} is_code={is_code} is_article={is_article} has_task_prompt={} has_memory={}",
+        task_prompt.map(str::trim).filter(|p| !p.is_empty()).is_some(),
+        !memory_context.is_empty()
+    );
     let mode_contract = pm.render(&format!("note/mode_{mode_key}"), ())?;
     let task_prompt_value = task_prompt.map(str::trim).filter(|p| !p.is_empty());
     let system_prompt = pm.render(
@@ -108,7 +139,13 @@ pub async fn generate_note(
     };
 
     let resp = stream_deepseek(app_handle, &req, &api_key).await?;
-    log::info!("[mind-engine] generated {} chars", resp.text.len());
+    log::debug!(
+        target: "agent",
+        "[engine] phase=done fn=generate_note output_chars={} model={} finish_reason={:?}",
+        resp.text.len(),
+        resp.model,
+        resp.finish_reason
+    );
     Ok(resp.text)
 }
 

@@ -15,16 +15,21 @@ const BASE_URL: &str = "https://api.deepseek.com";
 const CHAT_ENDPOINT: &str = "/chat/completions";
 
 /// 选择模型：Pro vs Flash
-fn pick_model(request: &MindRequest) -> &str {
+///
+/// 返回 (model_id, reason) —— reason 用于结构化日志（设计文档 §五「模型路由」埋点），
+/// 便于事后 grep/过滤 agent 路由决策。
+fn pick_model(request: &MindRequest) -> (&str, &'static str) {
     if let Some(ref m) = request.model_override {
-        return m;
+        return (m.as_str(), "model_override");
     }
     match request.task {
         super::types::AiTask::Summary
         | super::types::AiTask::Translation
         | super::types::AiTask::NextStepSuggestion
-        | super::types::AiTask::ResourceRecommend => "deepseek-v4-flash",
-        _ => "deepseek-v4-pro",
+        | super::types::AiTask::ResourceRecommend => {
+            ("deepseek-v4-flash", "lightweight_task")
+        }
+        _ => ("deepseek-v4-pro", "default_heavy_task"),
     }
 }
 
@@ -76,15 +81,38 @@ pub async fn stream_deepseek(
     api_key: &str,
 ) -> Result<MindResponse, AppError> {
     let client = Client::new();
-    let model = pick_model(request);
+    let (model, route_reason) = pick_model(request);
     let body = build_body(request, model);
 
     let url = format!("{BASE_URL}{CHAT_ENDPOINT}");
 
-    log::info!(
-        "[mind-engine] request: model={model}, task={}",
-        request.task
+    // ---- LLM 请求埋点（设计文档 §五）----
+    // 红线：绝不记 api_key / Authorization header / 完整 prompt 原文。
+    //       prompt 只记摘要（前 200 字符）+ 长度；max_tokens 是预算而非已用量。
+    let prompt_summary: String = request
+        .messages
+        .iter()
+        .map(|m| m.content.chars().take(200).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ⏐ ")
+        .chars().take(200).collect::<String>(); // 整体截断 200 字，防止多轮累积超标
+    let prompt_chars: usize = request
+        .messages
+        .iter()
+        .map(|m| m.content.chars().count())
+        .sum();
+    let max_tokens_budget = request.max_tokens.unwrap_or(65536);
+    log::debug!(
+        target: "agent",
+        "[llm] phase=request model={model} route_reason={route_reason} task={} stream={} max_tokens_budget={max_tokens_budget} prompt_chars={prompt_chars} system_prompt_chars={} prompt_summary={:?}",
+        request.task,
+        request.stream,
+        request.system_prompt.chars().count(),
+        prompt_summary,
     );
+
+    // 计时：覆盖整个 HTTP 请求 + 流式接收
+    let req_start = std::time::Instant::now();
 
     let response = client
         .post(&url)
@@ -101,6 +129,12 @@ pub async fn stream_deepseek(
             } else {
                 "network".to_string()
             };
+            log::warn!(
+                target: "agent",
+                "[llm] phase=request_failed model={model} kind={kind} duration_ms={} err={}",
+                req_start.elapsed().as_millis(),
+                e
+            );
             AppError::Ai {
                 kind: kind.to_string(),
                 message: e.to_string(),
@@ -111,8 +145,17 @@ pub async fn stream_deepseek(
     if !status.is_success() {
         let body_text = response.text().await.unwrap_or_default();
         let kind = AiErrorKind::classify(Some(status.as_u16()), &body_text);
+        log::warn!(
+            target: "agent",
+            "[llm] phase=http_error model={model} status={} kind={} duration_ms={}",
+            status.as_u16(),
+            kind,
+            req_start.elapsed().as_millis()
+        );
         return Err(AppError::Ai {
             kind: kind.to_string(),
+            // 红线：上游错误体可能回显请求片段，但这是 provider 返回而非我们注入的密钥，
+            //       且需要保留给上层诊断。Authorization header 不在此 body 中。
             message: body_text,
         });
     }
@@ -218,10 +261,23 @@ pub async fn stream_deepseek(
         },
     );
 
-    log::info!(
-        "[mind-engine] done: model={model}, text={}chars, reasoning={}chars",
-        full_text.len(),
-        reasoning_text.len(),
+    // ---- LLM 响应埋点（设计文档 §五）----
+    // finish_reason + token 用量 + 耗时；reasoning_content 单独分流（仅记长度，不记内容）。
+    let duration_ms = req_start.elapsed().as_millis();
+    let (in_tok, out_tok, reason_tok, total_tok) = usage
+        .as_ref()
+        .map(|u| (u.input_tokens, u.output_tokens, u.reasoning_tokens, u.total_tokens))
+        .unwrap_or((0, 0, None, 0));
+    let finish = finish_reason.as_deref().unwrap_or("none");
+    let output_chars = full_text.len();
+    let reasoning_chars = reasoning_text.len();
+    let reasoning_shunted = !reasoning_text.is_empty();
+    log::debug!(
+        target: "agent",
+        "[llm] phase=response model={model} finish_reason={finish} duration_ms={duration_ms} \
+         input_tokens={in_tok} output_tokens={out_tok} reasoning_tokens={:?} total_tokens={total_tok} \
+         output_chars={output_chars} reasoning_chars={reasoning_chars} reasoning_shunted={reasoning_shunted}",
+        reason_tok,
     );
 
     Ok(MindResponse {
@@ -293,16 +349,30 @@ pub async fn vision_complete(request: &VisionRequest, api_key: &str) -> Result<S
 
     let url = format!("{BASE_URL}{CHAT_ENDPOINT}");
 
-    log::info!(
-        "[vision] request: model={model}, task={}, images={}",
+    // ---- Vision LLM 请求埋点（设计文档 §五）----
+    let image_count = request
+        .messages
+        .iter()
+        .flat_map(|m| m.content.iter())
+        .filter(|b| matches!(b, super::types::VisionContentBlock::ImageUrl { .. }))
+        .count();
+    let text_chars: usize = request
+        .messages
+        .iter()
+        .flat_map(|m| m.content.iter())
+        .map(|b| match b {
+            super::types::VisionContentBlock::Text { text } => text.chars().count(),
+            _ => 0,
+        })
+        .sum();
+    log::debug!(
+        target: "agent",
+        "[vision] phase=request model={model} task={} images={image_count} text_chars={text_chars} max_tokens={:?}",
         request.task,
-        request
-            .messages
-            .iter()
-            .flat_map(|m| m.content.iter())
-            .filter(|b| matches!(b, super::types::VisionContentBlock::ImageUrl { .. }))
-            .count()
+        request.max_tokens
     );
+
+    let req_start = std::time::Instant::now();
 
     let response = client
         .post(&url)
@@ -313,6 +383,12 @@ pub async fn vision_complete(request: &VisionRequest, api_key: &str) -> Result<S
         .await
         .map_err(|e| {
             let kind = if e.is_timeout() { "timeout" } else { "network" };
+            log::warn!(
+                target: "agent",
+                "[vision] phase=request_failed model={model} kind={kind} duration_ms={} err={}",
+                req_start.elapsed().as_millis(),
+                e
+            );
             AppError::Ai {
                 kind: kind.to_string(),
                 message: e.to_string(),
@@ -323,6 +399,13 @@ pub async fn vision_complete(request: &VisionRequest, api_key: &str) -> Result<S
     if !status.is_success() {
         let body_text = response.text().await.unwrap_or_default();
         let kind = AiErrorKind::classify(Some(status.as_u16()), &body_text);
+        log::warn!(
+            target: "agent",
+            "[vision] phase=http_error model={model} status={} kind={} duration_ms={}",
+            status.as_u16(),
+            kind,
+            req_start.elapsed().as_millis()
+        );
         return Err(AppError::Ai {
             kind: kind.to_string(),
             message: body_text,
@@ -340,8 +423,10 @@ pub async fn vision_complete(request: &VisionRequest, api_key: &str) -> Result<S
         .to_string();
 
     let usage_total = json["usage"]["total_tokens"].as_u64().unwrap_or(0);
-    log::info!(
-        "[vision] done: model={model}, text={}chars, tokens={usage_total}",
+    log::debug!(
+        target: "agent",
+        "[vision] phase=response model={model} duration_ms={} output_chars={} total_tokens={usage_total}",
+        req_start.elapsed().as_millis(),
         text.len()
     );
 

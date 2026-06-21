@@ -7,13 +7,8 @@ fn main() {
         .unwrap_or_default();
     let config_dir = std::path::PathBuf::from(&home).join(".myriad-mind-app");
 
-    // 确保配置目录存在
+    // 确保配置目录存在（.env 加载等仍需此目录；日志初始化已移至 lib.rs 的 tauri-plugin-log）
     let _ = std::fs::create_dir_all(&config_dir);
-
-    // 初始化日志文件 ~/.myriad-mind-app/app.log
-    let log_path = config_dir.join("app.log");
-    let _ = simple_logging::log_to_file(log_path, log::LevelFilter::Debug);
-    log::info!("大衍决启动 — 日志写入 {}", config_dir.display());
 
     // 加载 .env
     let user_env = config_dir.join(".env");

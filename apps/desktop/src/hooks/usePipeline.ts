@@ -144,7 +144,6 @@ export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePip
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [streamingText, setStreamingText] = useState("");
 
-  const logIdRef = useRef(0);
   const streamAccumRef = useRef("");
   const streamChunkedRef = useRef(0); // chars already pushed to logs
   const pipelineCancelRef = useRef<(() => void) | null>(null);
@@ -159,8 +158,7 @@ export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePip
   // ---- Log helpers ----
 
   const pushLog = useCallback((type: LogEntry["type"], text: string) => {
-    logIdRef.current += 1;
-    setLogs((prev) => [...prev, { id: logIdRef.current, type, text, timestamp: Date.now() }]);
+    setLogs((prev) => [...prev, { id: crypto.randomUUID(), type, text, timestamp: Date.now() }]);
   }, []);
 
   // ---- Submit ----
@@ -190,7 +188,6 @@ export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePip
         setStatus(`❌ ${message}`);
         setProgressDetail(message);
         setProcessing(false);
-        logIdRef.current = 0;
         setLogs([]);
         pushLog("error", message);
         return;
@@ -208,7 +205,6 @@ export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePip
     streamChunkedRef.current = 0;
 
     // Reset logs for new run
-    logIdRef.current = 0;
     setLogs([]);
 
     pushLog("info", `输入: ${inputUrl.trim()}`);

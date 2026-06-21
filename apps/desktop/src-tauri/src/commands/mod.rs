@@ -5,6 +5,7 @@ pub mod deps;
 pub mod fetch;
 pub mod fs;
 pub mod library;
+pub mod logging;
 pub mod notes;
 pub mod pipeline;
 pub mod python;

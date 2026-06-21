@@ -119,18 +119,14 @@ export function InputView({ config, setupStatus, onOpenSetup }: InputViewProps) 
   const [qaProcessing, setQaProcessing] = useState(false);
   const [qaLogs, setQaLogs] = useState<LogEntry[]>([]);
   const [qaAnswer, setQaAnswer] = useState("");
-  const qaLogIdRef = useRef(0);
-
   const pushQaLog = useCallback((type: LogEntry["type"], text: string) => {
-    qaLogIdRef.current += 1;
-    setQaLogs((prev) => [...prev, { id: qaLogIdRef.current, type, text, timestamp: Date.now() }]);
+    setQaLogs((prev) => [...prev, { id: crypto.randomUUID(), type, text, timestamp: Date.now() }]);
   }, []);
 
   const handleQaSubmit = useCallback(async () => {
     if (!qaNotePath.trim() || !qaQuestion.trim() || qaProcessing) return;
     setQaProcessing(true);
     setQaLogs([]);
-    qaLogIdRef.current = 0;
     pushQaLog("step", `📖 读取笔记: ${qaNotePath}`);
     pushQaLog("step", `❓ 提问: ${qaQuestion}`);
 

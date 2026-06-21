@@ -1,5 +1,6 @@
 import { useConfig } from "@/hooks/useConfig";
 import { useTheme } from "@/hooks/useTheme";
+import { useLogLevel } from "@/hooks/useLogLevel";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { InputView } from "@/components/input/InputView";
 import { DashboardView } from "@/components/dashboard/DashboardView";
@@ -11,6 +12,7 @@ import "./App.css";
 function App() {
   const { view, setView, config, firstLaunch, finishWizard, saveConfig, update, setupStatus } = useConfig();
   useTheme(); // 初始化主题（从 localStorage 读取并应用 data-theme）
+  useLogLevel(); // 初始化日志级别（从 localStorage 读取并下发 Rust log::set_max_level）
 
   return (
     <div className="app-root">

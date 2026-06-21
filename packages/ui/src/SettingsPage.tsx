@@ -13,6 +13,9 @@ import type { DepsInfo } from "./types.js";
 
 export type ThemeMode = "light" | "dark" | "system";
 
+/** 日志级别（与 api.ts LogLevel 对齐；error 级别对用户无意义，不下放） */
+export type LogLevel = "trace" | "debug" | "info" | "warn";
+
 export interface SettingsPageProps {
   config: MyriadMindConfig;
   /** 配置字段变更（直接改 App 内存 config，由 useConfig debounce 自动写盘） */
@@ -43,6 +46,12 @@ export interface SettingsPageProps {
   onTestAiConnection?: () => Promise<string>;
   /** 打开外部链接（注册页等，调系统浏览器） */
   onOpenUrl?: (url: string) => void;
+  /** 当前日志级别（运行时偏好，由前端 localStorage 持久化，不入 config.json） */
+  logLevel?: LogLevel;
+  /** 日志级别切换回调（即时下发 Rust log::set_max_level） */
+  onLogLevelChange?: (level: LogLevel) => void;
+  /** 打开日志目录（~/.myriad-mind-app/logs/） */
+  onOpenLogDir?: () => void;
 }
 
 type TabId = "overview" | "keys" | "processing" | "output" | "features" | "advanced" | "about";
@@ -75,6 +84,9 @@ export function SettingsPage({
   appIcon,
   onTestAiConnection,
   onOpenUrl,
+  logLevel,
+  onLogLevelChange,
+  onOpenLogDir,
 }: SettingsPageProps) {
   const [tab, setTab] = useState<TabId>("overview");
   // config / update 由父级 useConfig 提供：改动即时进 App 内存 config，
@@ -105,7 +117,7 @@ export function SettingsPage({
           {tab === "processing" && <ProcessingTab config={config} update={update} deps={deps} />}
           {tab === "output" && <OutputTab config={config} update={update} onSelectDir={onSelectOutputDir} onOpenDir={onOpenOutputDir} onOpenCacheDir={onOpenCacheDir} />}
           {tab === "features" && <FeaturesTab config={config} update={update} />}
-          {tab === "advanced" && <AdvancedTab config={config} update={update} />}
+          {tab === "advanced" && <AdvancedTab config={config} update={update} logLevel={logLevel} onLogLevelChange={onLogLevelChange} onOpenLogDir={onOpenLogDir} />}
           {tab === "about" && <AboutTab appIcon={appIcon} />}
         </div>
       </div>
@@ -633,10 +645,13 @@ function FeaturesTab({
 // ============================================================
 
 function AdvancedTab({
-  config, update,
+  config, update, logLevel, onLogLevelChange, onOpenLogDir,
 }: {
   config: MyriadMindConfig;
   update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
+  logLevel?: LogLevel;
+  onLogLevelChange?: (level: LogLevel) => void;
+  onOpenLogDir?: () => void;
 }) {
   return (
     <>
@@ -679,6 +694,35 @@ function AdvancedTab({
           description="基于当前知识结构推荐下一步学习方向"
           checked={config.post_process.auto_suggest_next}
           onChange={(v) => update("post_process", { ...config.post_process, auto_suggest_next: v })} />
+      </SettingsSection>
+
+      <SettingsSection title="日志与调试">
+        <p style={{ fontSize: 11, color: "var(--text-muted, #666)", margin: "0 0 6px" }}>
+          控制 Rust 后端日志输出级别（Stdout / 日志文件 / 前端 F12 console 三通道同步生效）。切换即时生效，不写入 config.json。
+        </p>
+        {onLogLevelChange && (
+          <Select
+            label="日志级别"
+            value={logLevel ?? "info"}
+            options={[
+              { value: "trace", label: "Trace — 全量（调试，日志量大）" },
+              { value: "debug", label: "Debug — 详细（开发排查）" },
+              { value: "info", label: "Info — 默认（用户级）" },
+              { value: "warn", label: "Warn — 仅警告与错误" },
+            ]}
+            onChange={(e) => onLogLevelChange(e.target.value as LogLevel)}
+          />
+        )}
+        {onOpenLogDir && (
+          <div style={{ marginTop: 10 }}>
+            <Button variant="secondary" onClick={onOpenLogDir}>
+              📁 打开日志目录
+            </Button>
+            <span style={{ fontSize: 11, color: "var(--text-muted, #666)", marginLeft: 10 }}>
+              日志文件位于 ~/.myriad-mind-app/logs/（按 50MB 轮转，保留最近 2 份）
+            </span>
+          </div>
+        )}
       </SettingsSection>
     </>
   );

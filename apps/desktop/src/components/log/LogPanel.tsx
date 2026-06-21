@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useCallback } from "react";
 export type LogEntryType = "info" | "step" | "output" | "success" | "error" | "divider";
 
 export interface LogEntry {
-  id: number;
+  id: string;
   type: LogEntryType;
   text: string;
   timestamp: number;

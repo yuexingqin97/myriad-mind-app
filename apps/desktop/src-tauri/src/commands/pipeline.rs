@@ -108,10 +108,15 @@ pub async fn execute_pipeline(
     // 步骤 0: 依赖检查
     emit_progress(&app, "deps", "环境检查", 5.0, "running", None);
     if let Err(e) = validate_pipeline_deps(&input_mode, &py) {
+        // 缺失依赖的英文原因（FFmpeg/yt-dlp 未找到等）走开发者日志
+        log::warn!(
+            target: "agent",
+            "[pipeline] phase=deps status=failed err={e}"
+        );
         emit_progress(
             &app,
             "deps",
-            &format!("环境检查未通过: {e}"),
+            "环境检查未通过",
             8.0,
             "failed",
             Some("请到设置页修复依赖后重新检测"),
@@ -319,7 +324,7 @@ async fn run_video_pipeline(
             "completed",
             Some("命中 temp 缓存。需重新下载：设置关闭「保留临时文件」开关"),
         );
-        log::info!(
+        log::debug!(target: "agent",
             "[pipeline] cache hit: {} exists, skip download",
             video_path.display()
         );
@@ -336,13 +341,17 @@ async fn run_video_pipeline(
         match download_douyin_video(python_path, input, &video_path, &temp_dir).await {
             Ok(title) => Ok(title),
             Err(e) => {
-                let msg = e.to_string();
-                log::error!("[pipeline] bilibili: AI Douyin 失败，回退 yt-dlp: {msg}");
+                // 原始错误（可能含上游 HTTP body / API 错误原文）走开发者日志，
+                // detail 只给用户一句中文说明，避免技术细节进 LogPanel。
+                log::error!(
+                    target: "agent",
+                    "[pipeline] phase=download status=ai_douyin_failed fallback=ytdlp err={e}"
+                );
                 emit_progress(
                     app, "download",
                     "⚠️ AI Douyin 失败，回退 yt-dlp",
                     18.0, "running",
-                    Some(&msg),
+                    Some("AI Douyin 解析失败，改用 yt-dlp 直接下载"),
                 );
                 download_video_ytdlp(python_path, input, mode, &video_path)
             }
@@ -367,12 +376,15 @@ async fn run_video_pipeline(
                 );
             }
             Err(e) => {
-                log::warn!("[pipeline] download failed: {e}");
+                log::warn!(
+                    target: "agent",
+                    "[pipeline] phase=download status=failed optional={optional_download} err={e}"
+                );
                 if optional_download {
                     emit_progress(
                         app,
                         "download",
-                        &format!("视频下载跳过: {e}"),
+                        "视频下载跳过",
                         22.0,
                         "completed",
                         Some("已获得字幕文本，将继续生成笔记；只是没有关键帧截图"),
@@ -459,7 +471,12 @@ async fn run_video_pipeline(
                 }
             }
             Err(e) => {
-                log::warn!("[pipeline] ffmpeg audio extraction failed: {e}");
+                // 原始错误（含 FFmpeg 英文 stderr / AppError 堆栈）走开发者日志，
+                // 不进 emit_progress.detail —— detail 经 usePipeline.ts 直接渲染进用户 LogPanel。
+                log::warn!(
+                    target: "agent",
+                    "[pipeline] phase=extract_audio status=ffmpeg_failed err={e}"
+                );
                 if is_online_video(mode) {
                     emit_progress(
                         app,
@@ -467,7 +484,7 @@ async fn run_video_pipeline(
                         "视频抽音频失败，尝试直接下载音频",
                         28.0,
                         "running",
-                        Some(&e.to_string()),
+                        Some("FFmpeg 抽取失败，改为用 yt-dlp 下载音轨"),
                     );
                     match download_audio_ytdlp(python_path, input, &audio_path) {
                         Ok(()) if media_file_ready(&audio_path) => emit_progress(
@@ -486,23 +503,29 @@ async fn run_video_pipeline(
                             "failed",
                             Some("请检查源视频是否有可下载音轨"),
                         ),
-                        Err(download_err) => emit_progress(
-                            app,
-                            "extract_audio",
-                            &format!("音频提取失败: {download_err}"),
-                            30.0,
-                            "failed",
-                            Some("FFmpeg 抽取失败，yt-dlp 直接下载音频也失败"),
-                        ),
+                        Err(download_err) => {
+                            log::warn!(
+                                target: "agent",
+                                "[pipeline] phase=extract_audio status=download_fallback_failed err={download_err}"
+                            );
+                            emit_progress(
+                                app,
+                                "extract_audio",
+                                "音频提取失败",
+                                30.0,
+                                "failed",
+                                Some("FFmpeg 抽取失败，yt-dlp 直接下载音频也失败"),
+                            )
+                        }
                     }
                 } else {
                     emit_progress(
                         app,
                         "extract_audio",
-                        &format!("音频提取失败: {e}"),
+                        "音频提取失败",
                         30.0,
                         "failed",
-                        None,
+                        Some("请确认视频包含音轨，或检查 FFmpeg 是否安装"),
                     );
                 }
             }
@@ -533,14 +556,20 @@ async fn run_video_pipeline(
                 "failed",
                 Some("请检查源视频是否有可下载音轨"),
             ),
-            Err(e) => emit_progress(
-                app,
-                "extract_audio",
-                &format!("音频下载失败: {e}"),
-                30.0,
-                "failed",
-                Some("没有字幕文本，也没有可用音频，无法继续 ASR"),
-            ),
+            Err(e) => {
+                log::warn!(
+                    target: "agent",
+                    "[pipeline] phase=extract_audio status=download_failed err={e}"
+                );
+                emit_progress(
+                    app,
+                    "extract_audio",
+                    "音频下载失败",
+                    30.0,
+                    "failed",
+                    Some("没有字幕文本，也没有可用音频，无法继续 ASR"),
+                )
+            }
         }
     }
 
@@ -644,11 +673,16 @@ async fn run_video_pipeline(
                         }
                     }
                     Err(e) => {
-                        log::warn!("[pipeline] subtitle analysis failed: {e}");
+                        // 原始错误（DeepSeek 响应原文 / 解析堆栈）走开发者日志，
+                        // detail 只给用户一句中文说明。
+                        log::warn!(
+                            target: "agent",
+                            "[pipeline] phase=subtitle_analysis status=failed err={e}"
+                        );
                         emit_progress(
                             app,
                             "subtitle_analysis",
-                            &format!("字幕分析跳过: {e}"),
+                            "字幕分析跳过",
                             50.0,
                             "completed",
                             Some("不影响笔记生成，将使用常规截图方式"),
@@ -737,7 +771,7 @@ async fn run_video_pipeline(
                                     let _ = std::fs::copy(&src, &dst);
                                 }
                             }
-                            log::info!(
+                            log::debug!(target: "agent",
                                 "[pipeline] copied {} screenshots to assets/{}",
                                 result.selected.len(),
                                 video_id
@@ -936,7 +970,11 @@ async fn run_video_pipeline(
                     );
                 }
                 Err(e) => {
-                    emit_progress(app, "save", &format!("保存失败: {e}"), 95.0, "failed", None);
+                    log::warn!(
+                        target: "agent",
+                        "[pipeline] phase=save status=failed err={e}"
+                    );
+                    emit_progress(app, "save", "保存失败", 95.0, "failed", Some("笔记写入磁盘失败，详情见日志文件"));
                     return Err(e);
                 }
             }
@@ -1127,13 +1165,18 @@ async fn run_text_pipeline(
             emit_progress(app, "library", "索引就绪", 40.0, "completed", detail.as_deref());
         }
         Err(e) => {
+            // 索引失败原因（文件系统错误等）走开发者日志，detail 只给用户中文短语
+            log::warn!(
+                target: "agent",
+                "[pipeline] phase=library status=index_failed err={e}"
+            );
             emit_progress(
                 app,
                 "library",
-                &format!("索引建立失败: {e}"),
+                "索引建立失败",
                 40.0,
                 "completed",
-                None,
+                Some("不影响本次笔记生成，详情见日志文件"),
             );
         }
     }
@@ -1250,19 +1293,29 @@ async fn run_text_pipeline(
                     emit_progress(app, "save", "笔记已保存", 98.0, "completed", Some(&detail));
                 }
                 Err(e) => {
-                    emit_progress(app, "save", &format!("保存失败: {e}"), 95.0, "failed", None);
+                    log::warn!(
+                        target: "agent",
+                        "[pipeline] phase=save status=failed err={e}"
+                    );
+                    emit_progress(app, "save", "保存失败", 95.0, "failed", Some("笔记写入磁盘失败，详情见日志文件"));
                     return Err(e);
                 }
             }
         }
         Err(e) => {
+            // AI 生成失败原因（DeepSeek 错误体等）走开发者日志，
+            // label/detail 只给用户中文短语（detail 经 usePipeline 渲染进 LogPanel）
+            log::error!(
+                target: "agent",
+                "[pipeline] phase=generate_note status=failed err={e}"
+            );
             emit_progress(
                 app,
                 "generate_note",
-                &format!("AI 生成失败: {e}"),
+                "AI 生成失败",
                 90.0,
                 "failed",
-                Some(&e.to_string()),
+                Some("模型生成失败，请检查网络/API Key/日志文件后重试"),
             );
             return Err(e);
         }
@@ -1312,9 +1365,16 @@ fn emit_progress(
         status: status.to_string(),
         detail: detail.map(|s| s.to_string()),
     };
-    log::info!("[pipeline] {status:>9} | {percent:>5.0}% | {step} | {label}");
+    // ---- 管线进度埋点（设计文档 §五「loop 每轮」）----
+    // 结构化格式：`[pipeline] step=X status=Y percent=N`，label 作为附加上下文。
+    // 用 debug 而非 info：emit_progress 高频触发，避免 release 默认 Info 级别刷屏
+    // （用户日志走 pipeline-progress 事件 + UI LogPanel，不依赖此行）。
+    log::debug!(
+        target: "agent",
+        "[pipeline] step={step} status={status} percent={percent:.0} label={label:?}"
+    );
     if let Err(e) = app.emit("pipeline-progress", event) {
-        log::error!("[pipeline] emit failed: {e}");
+        log::error!("[pipeline] step={step} status={status} emit_failed err={e}");
     }
 }
 
@@ -1337,7 +1397,7 @@ fn check_fingerprint_hit(base_dir: &str, fingerprint: &str) -> Option<ExistingNo
                 let full_path = std::path::PathBuf::from(base_dir).join(&path);
                 if full_path.exists() {
                     if let Ok(content) = std::fs::read_to_string(&full_path) {
-                        log::info!("[pipeline] fingerprint hit: {path}");
+                        log::debug!(target: "agent","[pipeline] fingerprint hit: {path}");
                         return Some(ExistingNote { path, content });
                     }
                 }
@@ -1707,7 +1767,7 @@ fn download_youtube_subtitles_with_python(
 
 /// 预取视频元信息（标题/作者/时长），不下载视频
 fn fetch_video_metadata(python_path: &str, url: &str) -> Option<(String, String, f64)> {
-    log::info!("[metadata] yt-dlp --dump-json: {url}");
+    log::debug!(target: "agent","[metadata] yt-dlp --dump-json: {url}");
     let (program, prefix_args) = ytdlp_command(python_path);
     let mut cmd = std::process::Command::new(program);
     apply_windows_no_window(&mut cmd);
@@ -1735,7 +1795,7 @@ fn fetch_video_metadata(python_path: &str, url: &str) -> Option<(String, String,
         .to_string();
     let duration = json["duration"].as_f64().unwrap_or(0.0);
 
-    log::info!("[metadata] title={title}, author={author}, duration={duration:.0}s");
+    log::debug!(target: "agent","[metadata] title={title}, author={author}, duration={duration:.0}s");
     Some((title, author, duration))
 }
 
@@ -1745,7 +1805,7 @@ async fn resolve_via_ai_douyin(video_url: &str, temp_dir: &std::path::Path) -> R
     // 读取 AI Douyin API Key（优先级：配置文件 > OS 密钥链）
     let douyin_key = match crate::commands::config::read_config_value("ai_douyin_api_key") {
         Some(key) => {
-            log::info!("[douyin] found api key in config file (len={})", key.len());
+            log::debug!(target: "agent","[douyin] found api key in config file (len={})", key.len());
             key
         }
         None => {
@@ -1778,16 +1838,28 @@ async fn resolve_via_ai_douyin(video_url: &str, temp_dir: &std::path::Path) -> R
         AppError::Config(format!("AI Douyin API 响应解析失败: {e}"))
     })?;
 
-    // 打印完整响应结构便于调试
-    log::info!("[douyin] API response keys: {:?}", json.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-    log::info!("[douyin] API response: {}", serde_json::to_string(&json).unwrap_or_default());
+    // 只记结构摘要（顶层 keys + 字符数），不记响应原文 ——
+    // 响应 JSON 可能含下载直链、签名 URL、用户/会话标识等可重放凭证，
+    // 全量 serde_json::to_string 入日志会被 Webview target 转发到前端 F12 console，
+    // 违反设计文档 §五「日志绝不记录 API Key / 完整 prompt / 私密内容」红线。
+    // 响应原文已落盘到 download_url.json（下方 1793 行），排查时直接看文件即可。
+    let response_keys: Vec<&String> = json
+        .as_object()
+        .map(|o| o.keys().collect())
+        .unwrap_or_default();
+    let response_chars = serde_json::to_string(&json).map(|s| s.len()).unwrap_or(0);
+    log::debug!(
+        target: "agent",
+        "[douyin] phase=response keys={response_keys:?} body_chars={response_chars}"
+    );
 
     let json_path = temp_dir.join("download_url.json");
     std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap_or_default())
         .map_err(AppError::Io)?;
 
-    log::info!(
-        "[douyin] resolved video URL → {}",
+    log::debug!(
+        target: "agent",
+        "[douyin] phase=resolved json_path={}",
         json_path.display()
     );
     Ok(json_path)
@@ -1808,7 +1880,7 @@ async fn download_douyin_video(
 
     let output_str = output.to_string_lossy().to_string();
     let json_str = json_path.to_string_lossy().to_string();
-    log::info!("[douyin] download_video_candidates.py: {json_str} → {output_str}");
+    log::debug!(target: "agent","[douyin] download_video_candidates.py: {json_str} → {output_str}");
 
     let mut args: Vec<String> = vec![
         "--response-json".into(), json_str,
@@ -1848,7 +1920,7 @@ async fn download_douyin_video(
         "抖音视频".to_string()
     };
 
-    log::info!("[douyin] download complete: {title}");
+    log::debug!(target: "agent","[douyin] download complete: {title}");
     Ok(title)
 }
 
@@ -1860,7 +1932,7 @@ fn download_video_ytdlp(
     output: &std::path::Path,
 ) -> Result<String, AppError> {
     let output_str = output.to_string_lossy();
-    log::info!("[download] yt-dlp: {url}");
+    log::debug!(target: "agent","[download] yt-dlp: {url}");
     let (program, prefix_args) = ytdlp_command(python_path);
     let mut cmd = std::process::Command::new(program);
     apply_windows_no_window(&mut cmd);
@@ -1890,7 +1962,7 @@ fn download_video_ytdlp(
         .unwrap_or("未知标题")
         .trim()
         .to_string();
-    log::info!("[download] title: {title}");
+    log::debug!(target: "agent","[download] title: {title}");
 
     // 校验文件是否真的存在（yt-dlp 可能合并失败但仍返回 0）
     if !media_file_ready(output) {
@@ -1912,7 +1984,7 @@ fn download_audio_ytdlp(
     output: &std::path::Path,
 ) -> Result<(), AppError> {
     let output_template = output.to_string_lossy();
-    log::info!("[download_audio] yt-dlp: {url}");
+    log::debug!(target: "agent","[download_audio] yt-dlp: {url}");
     let (program, prefix_args) = ytdlp_command(python_path);
     let mut cmd = std::process::Command::new(program);
     apply_windows_no_window(&mut cmd);
@@ -2083,7 +2155,7 @@ fn extract_keyframes_guided(
         if ts_path.exists() {
             args.push("--timestamps".into());
             args.push(ts_path.to_string_lossy().to_string());
-            log::info!(
+            log::debug!(target: "agent",
                 "[pipeline] keyframes extraction with guided timestamps: {}",
                 ts_path.display()
             );

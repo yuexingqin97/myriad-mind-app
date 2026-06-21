@@ -65,8 +65,9 @@ pub async fn analyze_subtitle(
             message: format!("字幕分析 JSON 解析失败: {e}\n原始响应: {json_str}"),
         })?;
 
-    log::info!(
-        "[vision] subtitle analysis: {} guided timestamps from {} chars of SRT",
+    log::debug!(
+        target: "agent",
+        "[vision] phase=subtitle_analysis timestamps={} srt_chars={}",
         timestamps.len(),
         subtitle_srt.len()
     );
@@ -161,8 +162,9 @@ pub async fn review_keyframes(
     // 生成审查表 Markdown
     let review_table = build_review_table(total, &selected, skipped);
 
-    log::info!(
-        "[vision] screenshot review: {total} frames → {} selected, {skipped} skipped",
+    log::debug!(
+        target: "agent",
+        "[vision] phase=screenshot_review total={total} selected={} skipped={skipped}",
         selected.len()
     );
 
@@ -328,7 +330,7 @@ async fn review_hybrid(
     }
 
     // 第一次：批量快速粗筛（用 Flash + low detail 省 token）
-    log::info!("[vision] hybrid: batch pre-scan {} frames", frames.len());
+    log::debug!(target: "agent", "[vision] hybrid: batch pre-scan {} frames", frames.len());
     let pre_scan = review_batch(pm, frames, subtitle_srt, frames_dir, api_key).await?;
 
     // 找出需要精审的帧（分数在边界附近的）
@@ -482,8 +484,9 @@ pub async fn detect_tutorial_mode(
             signals: vec![],
         });
 
-    log::info!(
-        "[vision] tutorial detection: is_tutorial={}, confidence={:.2}",
+    log::debug!(
+        target: "agent",
+        "[vision] phase=tutorial_detection is_tutorial={} confidence={:.2}",
         result.is_tutorial,
         result.confidence
     );

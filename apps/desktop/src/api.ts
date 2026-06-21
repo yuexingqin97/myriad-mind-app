@@ -314,6 +314,38 @@ export async function openCacheDir(): Promise<void> {
   console.warn("[myriad-mind] open_cache_dir 仅在 Tauri 环境中可用");
 }
 
+// ---- 日志与调试（配套 tauri-plugin-log）----
+//
+// 级别不落 config.json：与 theme 同款"运行时偏好"语义，由前端 localStorage 持久化。
+// 即时生效路径：Rust set_log_level 命令调 log::set_max_level，影响 Stdout/Folder/Webview 三 Target。
+
+/** 合法的日志级别（与 Rust parse_level_filter 对齐；error 级别对用户无意义，不下放） */
+export type LogLevel = "trace" | "debug" | "info" | "warn";
+
+/**
+ * 运行时切换日志级别（即时生效）。
+ * 下发到 Rust 的 set_log_level 命令，调 log::set_max_level。
+ */
+export async function setLogLevel(level: LogLevel): Promise<void> {
+  if (await ensureTauri()) {
+    await tauriInvoke!("set_log_level", { level });
+    return;
+  }
+  console.warn("[myriad-mind] set_log_level 仅在 Tauri 环境中可用（当前级别：", level, "）");
+}
+
+/**
+ * 在系统文件管理器中打开日志目录（~/.myriad-mind-app/logs/）。
+ * 复用 Rust open_log_dir 命令（与 open_cache_dir 同款，手写分平台 spawn）。
+ */
+export async function openLogDir(): Promise<void> {
+  if (await ensureTauri()) {
+    await tauriInvoke!("open_log_dir");
+    return;
+  }
+  console.warn("[myriad-mind] open_log_dir 仅在 Tauri 环境中可用");
+}
+
 export async function executeQa(notePath: string, question: string, writeBack: boolean): Promise<string> {
   if (await ensureTauri()) return tauriInvoke!("execute_qa", { notePath, question, writeBack }) as Promise<string>;
   return "（浏览器模拟）基于笔记内容的回答...";

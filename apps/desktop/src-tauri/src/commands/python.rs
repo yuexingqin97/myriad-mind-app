@@ -13,6 +13,154 @@ use tokio::process::Command;
 const PYTHON_MIN_VERSION: (u32, u32) = (3, 9);
 
 // ============================================================
+// 日志脱敏
+// ============================================================
+
+/// 判断字符是否可能出现在 token / api key 中（base64/hex/常见分隔符）。
+/// 用于"裸 token"兜底脱敏（长度 ≥32 的连续可打印 token 串视为疑似密钥）。
+fn is_token_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '=' | '+' | '/')
+}
+
+/// 子进程 stderr 摘要脱敏 — 防止 argparse 报错/崩溃栈回显 `--api-key <value>`
+/// 时把明文密钥写进日志（Folder 文件 + Webview devtools + Stdout 三处）。
+///
+/// 覆盖三类已知泄漏形态：
+/// 1. `--api-key <value>` / `--api-key=<value>`：argv 回显（list_ai_douyin_tasks /
+///    download_video_candidates 都会把 douyin_key 作为命令行参数传入）
+/// 2. `Bearer xxx` / `X-API-Key: xxx` / `Authorization: xxx`：HTTP 头回显
+/// 3. 长度 ≥ 32 的连续 base64/hex 字符串：裸 token 兜底（覆盖未知参数名）
+///
+/// 本地路径 / URL 不算高敏，不在脱敏范围（与设计文档 §五红线一致：只防密钥）。
+/// 纯 Rust 手写扫描，不引入 regex crate 依赖。
+fn redact_secrets(input: &str) -> String {
+    // 1) flag 形式 `--api-key[= ]<value>` ——
+    //    按空白切 token，命中 flag 名就把紧跟的下一个非空 token 替换为 ***。
+    //    空白/换行原样回填，保留原始排版。
+    let raw_tokens: Vec<&str> = input.split_whitespace().collect();
+    let mut redacted_tokens: Vec<String> = Vec::with_capacity(raw_tokens.len());
+    let mut skip_next = false;
+    for tok in &raw_tokens {
+        if skip_next {
+            redacted_tokens.push("***".to_string());
+            skip_next = false;
+            continue;
+        }
+        let lower = tok.to_ascii_lowercase();
+        // `--api-key=value` 形式：保留到等号，值替换
+        if lower.starts_with("--api-key=")
+            || lower.starts_with("-api-key=")
+            || lower.starts_with("--api_key=")
+        {
+            if let Some(eq) = tok.find('=') {
+                redacted_tokens.push(format!("{}=***", &tok[..eq]));
+                continue;
+            }
+        }
+        // `--api-key` / `-api-key` / `--api_key` 独立 token：下一个 token 是值
+        if lower == "--api-key"
+            || lower == "-api-key"
+            || lower == "--api_key"
+            || lower == "-api_key"
+        {
+            redacted_tokens.push((*tok).to_string());
+            skip_next = true;
+            continue;
+        }
+        redacted_tokens.push((*tok).to_string());
+    }
+    // 用单空格重拼（stderr 摘要本身只取前 200 字符，丢掉原始换行排版可接受）
+    let joined = redacted_tokens.join(" ");
+
+    // 2) Bearer / X-API-Key / Authorization: <value> 形式 ——
+    //    按行扫描，命中前缀就把该行冒号后的内容整体替换为 ***。
+    let mut after_bearer = String::with_capacity(joined.len() + 16);
+    for line in joined.split_inclusive('\n') {
+        let (body, nl) = match line.strip_suffix('\n') {
+            Some(b) => (b, "\n"),
+            None => (line, ""),
+        };
+        let lower = body.to_ascii_lowercase();
+        let hit = lower.contains("bearer")
+            || lower.contains("x-api-key")
+            || lower.contains("authorization");
+        if hit {
+            if let Some(colon) = body.find(':') {
+                after_bearer.push_str(&body[..=colon]);
+                after_bearer.push_str(" ***");
+                after_bearer.push_str(nl);
+                continue;
+            }
+        }
+        after_bearer.push_str(body);
+        after_bearer.push_str(nl);
+    }
+
+    // 3) 兜底：长度 ≥ 32 的连续 token 字符串替换为 ***
+    //    （覆盖未知参数名回显 / 裸 token 堆栈）
+    let mut final_out = String::with_capacity(after_bearer.len() + 16);
+    let chars: Vec<char> = after_bearer.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if is_token_char(chars[i]) {
+            let start = i;
+            while i < chars.len() && is_token_char(chars[i]) {
+                i += 1;
+            }
+            let run: String = chars[start..i].iter().collect();
+            if run.len() >= 32 {
+                final_out.push_str("***");
+            } else {
+                final_out.push_str(&run);
+            }
+        } else {
+            final_out.push(chars[i]);
+            i += 1;
+        }
+    }
+    final_out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_secrets;
+
+    #[test]
+    fn redacts_api_key_flag() {
+        let s = "usage: prog --api-key API_KEY\nerror: invalid";
+        let out = redact_secrets(s);
+        assert!(!out.contains("API_KEY"));
+        assert!(out.contains("***"));
+    }
+
+    #[test]
+    fn redacts_api_key_equals() {
+        let long_key = "k".repeat(40);
+        let s = format!("--api-key={long_key}");
+        let out = redact_secrets(&s);
+        assert!(!out.contains(&long_key));
+        assert!(out.contains("***"));
+    }
+
+    #[test]
+    fn redacts_bearer() {
+        let tok = "t".repeat(48);
+        let s = format!("Authorization: Bearer {tok}");
+        let out = redact_secrets(&s);
+        assert!(!out.contains(&tok));
+        assert!(out.contains("***"));
+    }
+
+    #[test]
+    fn preserves_paths_and_short_text() {
+        let s = "FileNotFoundError: C:/tmp/video.mp4 not found";
+        let out = redact_secrets(s);
+        assert!(out.contains("video.mp4"));
+        assert!(!out.contains("***"));
+    }
+}
+
+// ============================================================
 // 脚本路径解析
 // ============================================================
 
@@ -121,6 +269,16 @@ pub async fn run_python_script(
         )));
     }
 
+    // ---- 子进程调度埋点（设计文档 §五）----
+    // 红线：只记脚本名 + 耗时 + exit_code + args 数量，**不记** stdout/stderr 全文，
+    //       也不记 args 内容（args 可能含 url / api-key / 本地路径，统一不展开）。
+    log::debug!(
+        target: "agent",
+        "[python] phase=dispatch script={script_name} args_count={}",
+        args.len()
+    );
+    let proc_start = std::time::Instant::now();
+
     let (program, prefix_args) = python_command_parts(python_path);
     let output = Command::new(program)
         .args(prefix_args)
@@ -131,6 +289,11 @@ pub async fn run_python_script(
         .output()
         .await
         .map_err(|e| {
+            log::warn!(
+                target: "agent",
+                "[python] phase=spawn_failed script={script_name} duration_ms={} err={e}",
+                proc_start.elapsed().as_millis()
+            );
             AppError::MissingDependency(format!("无法运行 Python '{}': {e}", python_path))
         })?;
 
@@ -138,6 +301,30 @@ pub async fn run_python_script(
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code().unwrap_or(-1);
     let success = output.status.success();
+
+    let duration_ms = proc_start.elapsed().as_millis();
+    if success {
+        log::debug!(
+            target: "agent",
+            "[python] phase=done script={script_name} exit_code={exit_code} duration_ms={duration_ms} stdout_len={} stderr_len={}",
+            stdout.len(),
+            stderr.len()
+        );
+    } else {
+        // 失败时 stderr 摘要前 200 字符（不全文），便于诊断又避免泄漏大段内容。
+        // 红线（设计文档 §五）：args 可能含 `--api-key <value>`，Python 脚本失败时
+        // argparse 报错 / 崩溃栈会把 argv 回显到 stderr，必须先脱敏再入日志，
+        // 否则明文密钥会被写进 Folder 文件 + Webview devtools + Stdout 三处。
+        let stderr_summary_raw: String = stderr.chars().take(200).collect();
+        let stderr_summary = redact_secrets(&stderr_summary_raw);
+        log::warn!(
+            target: "agent",
+            "[python] phase=failed script={script_name} exit_code={exit_code} duration_ms={duration_ms} \
+             stdout_len={} stderr_len={} stderr_summary={stderr_summary:?}",
+            stdout.len(),
+            stderr.len()
+        );
+    }
 
     Ok(PythonScriptResult {
         success,
