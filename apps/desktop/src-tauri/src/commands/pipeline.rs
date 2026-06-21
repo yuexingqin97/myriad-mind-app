@@ -1933,23 +1933,52 @@ fn download_video_ytdlp(
 ) -> Result<String, AppError> {
     let output_str = output.to_string_lossy();
     log::debug!(target: "agent","[download] yt-dlp: {url}");
+    let is_bilibili = matches!(_mode, InputMode::Bilibili);
     let (program, prefix_args) = ytdlp_command(python_path);
-    let mut cmd = std::process::Command::new(program);
+    let mut cmd = std::process::Command::new(&program);
     apply_windows_no_window(&mut cmd);
-    cmd.args(prefix_args);
+    cmd.args(&prefix_args);
     cmd.args([
         "-o",
         &output_str,
         "--print",
         "%(title)s",
         "--no-playlist",
-        url,
-    ])
-    .env("PYTHONUTF8", "1")
-    .env("PYTHONIOENCODING", "utf-8");
-    let r = cmd
+    ]);
+    //  B站 412 风控：缺 Referer 头会被拒。加上的话大部分视频不需要 Cookie 就能下。
+    if is_bilibili {
+        cmd.arg("--add-header").arg("Referer:https://www.bilibili.com");
+    }
+    cmd.arg(url)
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8");
+
+    let mut r = cmd
         .output()
         .map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
+
+    //  裸跑被 412 挡了？试 cookies-from-browser（B站受限内容需要登录态）。
+    if !r.status.success() && is_bilibili {
+        let stderr_first = String::from_utf8_lossy(&r.stderr);
+        if stderr_first.contains("412") {
+            log::warn!("[download] yt-dlp 裸跑 412，降级 --cookies-from-browser edge: {url}");
+            let mut cmd2 = std::process::Command::new(&program);
+            apply_windows_no_window(&mut cmd2);
+            cmd2.args(&prefix_args);
+            cmd2.args([
+                "-o", &output_str,
+                "--print", "%(title)s",
+                "--no-playlist",
+                "--add-header", "Referer:https://www.bilibili.com",
+                "--cookies-from-browser", "edge",
+                url,
+            ])
+            .env("PYTHONUTF8", "1")
+            .env("PYTHONIOENCODING", "utf-8");
+            r = cmd2.output().map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
+        }
+    }
+
     if !r.status.success() {
         let stderr = String::from_utf8_lossy(&r.stderr);
         log::error!("[download] yt-dlp failed: {stderr}");
