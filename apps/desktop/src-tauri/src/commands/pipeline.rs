@@ -1944,6 +1944,10 @@ fn download_video_ytdlp(
         "--print",
         "%(title)s",
         "--no-playlist",
+        "--remote-components", "ejs:github",
+        "--extractor-args", "youtube:player_client=android,web",
+        "--sleep-requests", "3", "--sleep-interval", "5",
+        "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
     ]);
     //  B站 412 风控：缺 Referer 头会被拒。加上的话大部分视频不需要 Cookie 就能下。
     if is_bilibili {
@@ -1969,6 +1973,8 @@ fn download_video_ytdlp(
                 "-o", &output_str,
                 "--print", "%(title)s",
                 "--no-playlist",
+                "--remote-components", "ejs:github",
+                "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
                 "--add-header", "Referer:https://www.bilibili.com",
                 "--cookies-from-browser", "edge",
                 url,

@@ -59,6 +59,12 @@ def build_ytdlp_command(
         *command,
         "--ignore-config",
         "--ignore-no-formats-error",
+        "--no-update",
+        "--js-runtimes", "node",
+        "--remote-components", "ejs:github",
+        "--extractor-args", "youtube:player_client=android,web",  #  android优先，web+curl_cffi伪装兜底
+        "--sleep-requests", "3", "--sleep-interval", "5",
+        "--socket-timeout", "30",
         "--skip-download",
         "--write-subs",
         "--write-auto-subs",
