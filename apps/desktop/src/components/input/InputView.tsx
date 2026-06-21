@@ -113,7 +113,7 @@ export function InputView({ config, setupStatus, onOpenSetup }: InputViewProps) 
     }
   }, [inputUrl, config]);
 
-  const [mode, setMode] = useState<"new" | "qa">("new");
+  const [mode] = useState<"new" | "qa">("new");
   const [qaNotePath, setQaNotePath] = useState("");
   const [qaQuestion, setQaQuestion] = useState("");
   const [qaProcessing, setQaProcessing] = useState(false);
@@ -171,29 +171,7 @@ export function InputView({ config, setupStatus, onOpenSetup }: InputViewProps) 
       <div className="view-header">
         <h2 className="view-title">📥 神识一扫，万物皆可为笔记</h2>
 
-        {/* 模式切换 */}
-        <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-          <button
-            onClick={() => setMode("new")}
-            style={{
-              padding: "6px 16px", fontSize: 13, fontWeight: 500, borderRadius: 8, border: "none", cursor: "pointer",
-              background: mode === "new" ? "var(--brand-soft, rgba(22,131,255,0.14))" : "transparent",
-              color: mode === "new" ? "var(--brand-primary, #1683ff)" : "var(--text-secondary, #a0a0c0)",
-            }}
-          >
-            🆕 新炼化
-          </button>
-          <button
-            onClick={() => setMode("qa")}
-            style={{
-              padding: "6px 16px", fontSize: 13, fontWeight: 500, borderRadius: 8, border: "none", cursor: "pointer",
-              background: mode === "qa" ? "var(--brand-soft, rgba(22,131,255,0.14))" : "transparent",
-              color: mode === "qa" ? "var(--brand-primary, #1683ff)" : "var(--text-secondary, #a0a0c0)",
-            }}
-          >
-            💬 追问笔记
-          </button>
-        </div>
+        {/* 追问笔记功能暂未开放，模式切换已隐藏（mode 恒 "new"，只保留新炼化）。恢复时加回「新炼化/追问笔记」切换按钮即可。 */}
 
         <div className="input-area">
           {mode === "new" ? (

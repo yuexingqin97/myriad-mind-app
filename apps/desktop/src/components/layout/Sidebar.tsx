@@ -29,13 +29,9 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
           hotkey="1"
           onClick={() => onNavigate("input")}
         />
-        <NavButton
-          active={activeView === "dashboard"}
-          icon="📊"
-          label="修为"
-          hotkey="2"
-          onClick={() => onNavigate("dashboard")}
-        />
+        {/* 修为面板暂未真实化（仍是前端假数据），导航入口已隐藏。恢复时取消注释：
+        <NavButton active={activeView === "dashboard"} icon="📊" label="修为" hotkey="2" onClick={() => onNavigate("dashboard")} />
+        */}
         <NavButton
           active={activeView === "settings"}
           icon="⚙️"
