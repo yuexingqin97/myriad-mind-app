@@ -3,6 +3,8 @@
 > 参考：`D:\Project\MyClaude\大衍决残卷\CodeWhale代码分析\CodeWhale-完整深度分析.md`  
 > DeepSeek 官方文档：https://api-docs.deepseek.com/zh-cn/  
 > 设计原则：轻量借鉴 CodeWhale 的模型注册、Provider 抽象、错误分类和路由思想，不引入完整 Agent Loop。
+>
+> 📌 本文聚焦**模型层**（Provider 抽象 / Pro·Flash 路由）。Agent 层（tool use loop / 工具编排）见 [Agent架构设计](./Agent架构设计.md)。
 
 ## 一、设计结论
 
