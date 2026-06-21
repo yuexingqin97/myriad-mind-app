@@ -304,6 +304,157 @@ loop {
 }
 ```
 
+### 6.6 Context Manager：短期工作记忆
+
+Agent loop 不直接维护无限增长的 messages。Runtime 引入 ContextManager，在 loop 每轮开始前构建发给 LLM 的"上下文包"——**messages 是 LLM 的输入窗口，不是状态库，真正的状态拆到 TaskState / ArtifactStore / Archive 三层。**
+
+#### 6.6.1 记忆分层
+
+| 层 | 生命周期 | 内容 | 是否进 messages |
+|---:|---|---|---|
+| Long-term Memory | 跨任务 | `.myriad-mind/memory.md`（目录级记忆）、用户偏好、知识库索引 | 否，只注入结构化摘要（阶段 0） |
+| Task State | 当前炼化任务 | 当前阶段、检查点、artifact 引用清单、失败计数、已做决策 | 是，始终注入（结构化块，非自然语言复述） |
+| Artifact Store | 当前任务 / 可持久 | 字幕全文、网页正文、ASR JSON、代码扫描结果、截图审查结果、笔记草稿 | 否，只给引用 + 简短摘要 |
+| Short-term Window | 当前 LLM 请求 | 最近 N 轮对话、最近工具结果摘要、当前待决策问题 | 是 |
+| Archive / Journal | 调试与召回 | 完整 tool_use / tool_result 历史 JSONL | 否，必要时检索召回 |
+
+> **关键区别**：§四「上下文注入」里的 `memory.md` 是 **Long-term Memory**（跨任务偏好和分类积累），本节 ContextManager 管的是 **Task State + Short-term Window**（当前任务的工作记忆）。两者在 agent loop 里由 ContextManager 统一注入，但来源和更新机制不同。
+
+#### 6.6.2 ToolOutput 结构：artifact 优先
+
+工具返回 **不做全文回喂**，统一为摘要 + 引用：
+
+```rust
+struct ToolOutput {
+    summary: String,                  // 给 LLM 的短摘要
+    artifact_refs: Vec<ArtifactRef>,  // 原文 / 大结果落盘后的引用
+    metadata: Value,                  // token 数、耗时、文件类型等
+}
+
+struct ArtifactRef {
+    id: String,           // "artifact/transcript.vtt"
+    path: PathBuf,        // 落盘路径
+    kind: ArtifactKind,   // Transcript | ArticleText | CodeScan | Screenshots | Draft
+    tokens_estimate: u64,
+    summary: String,      // 单行描述："本视频主要讲 Rust async runtime..."
+}
+```
+
+**示例**——ASR 完成后不回喂 100k 字幕，而是：
+
+```text
+[transcribe_asr 完成]
+- artifact: artifacts/transcript.vtt
+- duration: 38min | language: zh-CN | tokens: ~45k
+- summary: 本视频主要讲 Rust async runtime、Tokio task 调度、select! 取消模式……
+- key_segments: 00:03:12 async runtime 定义；00:18:40 select! 示例；00:31:05 常见坑
+```
+
+需要全文时，agent 调 `read_artifact` / `search_artifact` 检索落盘内容——**不占 messages 窗口，但随时可召回。**
+
+**原则**：
+- 字幕、网页正文、代码扫描结果 **从一开始就 artifact 化**，不在 messages 里放全文
+- 截图审查结果、AI 中间推理等"分析结论"体积小、对后续决策直接有用，可保留在 messages 内
+- `tool_use` / `tool_result` 对不可拆散——压缩只能发生在完整工具回合之后，不能在 tool_use 和 tool_result 之间截断
+
+#### 6.6.3 TaskState：结构化任务状态
+
+`TaskState` 由代码在阶段推进时自动更新，**不调 LLM 生成**（零额外 token 开销）：
+
+```rust
+struct TaskState {
+    phase: Phase,                // Recall | Acquire | Analyze | Generate | Verify | Memorize
+    input_summary: String,       // "B站视频 BV1xx, 38分钟, 中文字幕, 编程教程"
+    artifact_refs: Vec<ArtifactRef>,
+    checkpoint_status: CheckpointStatus,
+    consecutive_failures: u8,
+    decisions: Vec<String>,      // "已跳过 ASR（有字幕）" "已检测指纹→复用旧笔记"
+    open_issues: Vec<String>,    // "阶段 3 需验证术语表是否完整"
+}
+```
+
+ContextManager 在阶段推进时更新 `TaskState`，每次发给 LLM 时注入为结构化 YAML 块：
+
+```yaml
+# task_state（本块由框架自动生成，你不可修改）
+phase: Analyze
+input: B站视频 BV1xx, 38分钟, 中文字幕
+artifacts:
+  - id: transcript.vtt, tokens: 45623, summary: "Rust async runtime 教程"
+  - id: article.md, tokens: 3210, summary: "配套博文"
+  - id: keyframes/, kind: Screenshots, count: 12
+checkpoint: artifacts_ready
+decisions:
+  - 有字幕，已跳过 ASR
+  - 上次截图审查有 3 帧模糊，标记待重截
+open_issues: []
+```
+
+**原则**：`TaskState` 是 LLM 的"工作面板"——它告诉你手头有什么材料、到了哪一步、做了哪些决策——但不复述材料内容。内容在 artifact 里，需要时调工具读取。
+
+#### 6.6.4 阶段边界清零策略
+
+笔记 agent 的 4 个主阶段（§四 阶段 1-4）**提供了天然的 context restart 点**，优先按阶段边界清零，而不是按 token 阈值触发：
+
+| 阶段边界 | 保留进下一阶段 | 清除 |
+|---|---|---|
+| 阶段 1→2 | `TaskState`（phase=Analyze, artifact 清单, decisions） | 阶段 1 原始 tool_result（下载进度 / fetch 日志 / ASR 过程信息） |
+| 阶段 2→3 | `TaskState`（phase=Generate, screenshot review 结论, artifact 清单） | 阶段 2 截图 plan / 审查中间推理 / 单帧审查详情 |
+| 阶段 3→4（自检） | 笔记草稿 artifact 引用 + 契约清单 + `TaskState` | 阶段 3 生成过程的 tool_use 历史 |
+
+**每阶段开始时，LLM 看到的是**：system prompt + task_state 块 + 当前阶段工具调用上下文。旧阶段的完整历史已写入 JSONL archive，需要时可通过 `read_archive` 召回。
+
+**触发时机**：
+- **阶段推进时（主要）**：ContextManager 在 `advance_phase()` 时自动清零旧 stage 的 messages，只保留 `TaskState` + artifact refs
+- **同阶段内超长 tool 链（罕见）**：如果同阶段 tool call 超过 15 轮，触发 intra-stage compact（保留 task_state，清除早期 tool 回合）
+
+#### 6.6.5 Cycle Restart（P1，延后实现）
+
+**适用场景**：超长输入（>500k tokens 原始材料）或复杂代码仓导致 LLM 检索质量下降时。
+
+**流程**：
+1. 完整历史归档到 `runs/{task_id}/cycles/{n}.jsonl`
+2. 框架生成一个 `<carry_forward>` 结构化摘要（内容由 `TaskState` + artifact 清单构成，**不额外调 LLM**）
+3. 清空旧 messages
+4. 用以下内容开启新 cycle：system prompt + task_state 块 + carry_forward + artifact refs + 最近 1-2 个关键交互
+
+`carry_forward` 格式（注入为 user 消息）：
+
+```text
+## Context Carry Forward
+
+以下是上一 cycle 的上下文压缩摘要，只用于续接任务。
+它低于实时工具结果、当前 artifact 原文和用户最新指令。
+如果摘要与 artifact / 工具输出冲突，以后者为准。
+
+### Goal
+把用户输入炼化成结构化学习笔记
+
+### Current Phase
+Analyze（阶段 2）
+
+### Artifacts
+- transcript.vtt (45k tokens): Rust async runtime 教程字幕
+- article.md (3k tokens): 配套博文
+- keyframes/ (12 frames): 时间点截图
+
+### Decisions
+- 有字幕，已跳过 ASR
+- 教程类视频，keyframes 密集截取
+
+### Open Issues
+- 3 张截图模糊，下一 cycle 需重截
+
+### Next Step
+用 Vision 审查 keyframes，筛选可嵌入笔记的帧
+```
+
+**为什么标记 P1**：
+- 笔记 agent 的 tool call 次数少（典型 5-15 轮），1M 窗口对大部份任务够用
+- 阶段边界清零（§6.6.4）已覆盖主要场景
+- Cycle restart 仅在超长输入 / 大代码仓等极端场景才需要，投入产出比低
+- CodeWhale 已验证可行，需要时直接参考其 `cycle_handoff.md` + `cycle_manager.rs` 即可
+
 ---
 
 ## 七、无审批门设计决策
@@ -380,7 +531,7 @@ agent 化后，提示词从"单轮 note/system.md"演进为：
 |------|------|------|
 | **0** | 提示词共享化（.md → `packages/core/prompts`，Rust 改路径，**删 core TS 死代码**） | desktop 生成笔记正常，路径指向 core |
 | **1** | 现有 commands 封装成工具（ToolSpec + ToolHandler trait + 工具注册表），底层逻辑不动 | 全部工具可独立调用，返回 ToolOutput |
-| **2** | 实现 agent loop（deepseek.rs 加 `tools` + 循环 + tool_result 回喂 + 护栏）+ agent charter prompt | agent 对任意输入能自主选工具跑通一次 |
+| **2** | 实现 agent loop（deepseek.rs 加 `tools` + 循环 + tool_result 回喂 + 护栏）+ **ContextManager（§6.6）** + ToolOutput artifact 化 + agent charter prompt | agent 对任意输入能自主选工具跑通一次，上下文不随 tool call 暴涨 |
 | **3** | **接线 + 删旧**：`execute_pipeline` 改为调度 agent；删除 `run_*_pipeline` 4 分流 + 相关硬编码步骤事件 | agent 为唯一路径，4 类输入全部能炼化，`pipeline.rs` 无死代码 |
 
 > 不设"配置开关回退"——阶段 3 完成即 agent 为唯一实现。开发期可接受中间状态不可用。
@@ -392,7 +543,7 @@ agent 化后，提示词从"单轮 note/system.md"演进为：
 | 风险 | 应对 |
 |------|------|
 | DeepSeek tool use 稳定性 | CodeWhale 已验证可行 |
-| 多轮调用 token 成本高 | 护栏（最大步数）+ 工具结果精简（不回喂冗余） |
+| 多轮调用 token 成本高 | 护栏（最大步数）+ 工具结果 artifact 化（§6.6.2：大文本绝不回喂，只给摘要 + 引用）+ 阶段边界清零（§6.6.4） |
 | agent 失控（绕圈子） | 最大步数 + 超时强制结束 |
 | 重构期功能短暂不可用 | Alpha 阶段可接受；分阶段降低单次改动面 |
 | 提示词跨语言渲染不一致（Rust minijinja vs TS nunjucks） | 统一用 Jinja2 兼容语法，加测试比对 |
