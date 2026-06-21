@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useRef } from "react";
-import { type MyriadMindConfig, classifyInput, estimateCost, type TokenEstimate } from "@myriad-mind/core";
+import { type MyriadMindConfig, type SetupStatus, classifyInput, estimateCost, type TokenEstimate } from "@myriad-mind/core";
 import { Button, Input } from "@myriad-mind/ui";
 import { usePipeline } from "@/hooks/usePipeline";
 import { LogPanel, type LogEntry } from "@/components/log/LogPanel";
@@ -10,6 +10,8 @@ import { isTauri } from "@/lib/platform";
 
 interface InputViewProps {
   config: MyriadMindConfig;
+  setupStatus: SetupStatus;
+  onOpenSetup: () => void;
 }
 
 // ---- Platform display helpers ----
@@ -80,7 +82,7 @@ const SUPPORTED_INPUTS = [
 
 // ---- Component ----
 
-export function InputView({ config }: InputViewProps) {
+export function InputView({ config, setupStatus, onOpenSetup }: InputViewProps) {
   const {
     inputUrl,
     setInputUrl,
@@ -95,7 +97,7 @@ export function InputView({ config }: InputViewProps) {
     logs,
     streamingText,
     submit,
-  } = usePipeline({ config });
+  } = usePipeline({ config, setupStatus });
 
   // 实时预览：输入 URL 后即时显示分类和预估
   const preview = useMemo(() => {
@@ -257,8 +259,52 @@ export function InputView({ config }: InputViewProps) {
             </>
           )}
 
-          {/* ---- 支持的输入内容（仅空输入时显示）---- */}
-          {showHints && (
+          {/* ---- 配置未就绪引导（仅空输入时显示）---- */}
+          {showHints && setupStatus !== "ready" && (
+            <div className="config-required-card" style={{
+              padding: "14px 16px", borderRadius: 10, marginBottom: 12,
+              background: setupStatus === "needs_config" ? "rgba(250,204,21,0.06)"
+                : setupStatus === "invalid_config" ? "rgba(248,113,113,0.06)"
+                : "var(--bg-surface, #1a1a2e)",
+              border: `1px solid ${setupStatus === "needs_config" ? "rgba(250,204,21,0.25)"
+                : setupStatus === "invalid_config" ? "rgba(248,113,113,0.25)"
+                : "var(--border, #2a2a4a)"}`,
+            }}>
+              {setupStatus === "needs_config" && (
+                <>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: "#facc15", margin: "0 0 4px" }}>
+                    ⚠️ 还差一步才能开始炼化
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--text-secondary, #a0a0c0)", margin: "0 0 10px" }}>
+                    需要先配置 DeepSeek API Key{!config.output.note_dir?.trim() ? " 和笔记输出目录" : ""}。
+                  </p>
+                  <Button onClick={onOpenSetup}>🧭 打开配置向导</Button>
+                </>
+              )}
+              {setupStatus === "invalid_config" && (
+                <>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: "#f87171", margin: "0 0 4px" }}>
+                    ⚠️ 配置文件有问题
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--text-secondary, #a0a0c0)", margin: "0 0 10px" }}>
+                    ~/.myriad-mind-app/config.json 校验失败，需要修复后才能炼化。
+                  </p>
+                  <Button onClick={onOpenSetup}>去设置修复</Button>
+                </>
+              )}
+              {setupStatus === "backend_unavailable" && (
+                <p style={{ fontSize: 12, color: "var(--text-muted, #666)", margin: 0 }}>
+                  💻 当前为浏览器预览模式 — 依赖检测和真实炼化不可用，仍可预览输入识别和灵力预估。
+                </p>
+              )}
+              {setupStatus === "checking" && (
+                <p style={{ fontSize: 12, color: "var(--text-muted, #666)", margin: 0 }}>正在检查配置…</p>
+              )}
+            </div>
+          )}
+
+          {/* ---- 支持的输入内容（配置就绪 + 空输入时显示）---- */}
+          {showHints && setupStatus === "ready" && (
             <div className="supported-inputs">
               <span className="supported-inputs-label">支持识别并自动炼化：</span>
               <div className="supported-inputs-list">

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
   type MyriadMindConfig,
+  type SetupStatus,
   classifyInput,
   estimateCost,
 } from "@myriad-mind/core";
@@ -12,6 +13,7 @@ import type { LogEntry } from "@/components/log/LogPanel";
 
 interface UsePipelineOptions {
   config: MyriadMindConfig;
+  setupStatus: SetupStatus;
 }
 
 interface UsePipelineResult {
@@ -131,7 +133,7 @@ function missingRuntimeDeps(
 
 // ---- Hook ----
 
-export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
+export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePipelineResult {
   const [inputUrl, setInputUrl] = useState("");
   const [noteCategory, setNoteCategory] = useState("");
   const [taskPrompt, setTaskPrompt] = useState("");
@@ -165,6 +167,18 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
 
   const submit = useCallback(async () => {
     if (!inputUrl.trim() || processing) return;
+    // 配置就绪守卫（浏览器 mock 模式放行，允许预览输入识别）
+    if (await isTauri() && setupStatus !== "ready") {
+      const msg = setupStatus === "needs_config"
+        ? "需要先完成配置（DeepSeek API Key 等）。请到设置页配置。"
+        : setupStatus === "invalid_config"
+          ? "配置文件无效，请到设置页修复。"
+          : "配置未就绪，请稍候或检查设置。";
+      setStatus(`❌ ${msg}`);
+      setProgressDetail(msg);
+      pushLog("error", msg);
+      return;
+    }
     const classify = classifyInput(inputUrl.trim());
     const estimate = estimateCost(classify, config);
 
@@ -348,7 +362,7 @@ export function usePipeline({ config }: UsePipelineOptions): UsePipelineResult {
         setProcessing,
       );
     }
-  }, [inputUrl, config, processing, pushLog]);
+  }, [inputUrl, config, setupStatus, processing, pushLog]);
 
   return {
     inputUrl,

@@ -9,7 +9,7 @@ import type { MyriadMindConfig } from "@myriad-mind/core";
 import { Button } from "./common/Button.js";
 import { Card } from "./common/Card.js";
 import { Input, Select, Toggle } from "./common/Input.js";
-import type { DepsInfo, SetupIntent } from "./types.js";
+import type { DepsInfo, SetupIntent, WizardInitialStep } from "./types.js";
 
 export interface ConfigWizardProps {
   config: MyriadMindConfig;
@@ -22,10 +22,12 @@ export interface ConfigWizardProps {
   onRecheckDeps?: () => void;
   /** 选择输出目录 */
   onSelectOutputDir?: () => Promise<string | null>;
-  /** 打开输出目录 */
-  onOpenOutputDir?: () => void;
+  /** 打开输出目录（传目录路径，调系统文件管理器） */
+  onOpenOutputDir?: (dir: string) => void;
   /** 打开外部链接（注册页等，调系统浏览器） */
   onOpenUrl?: (url: string) => void;
+  /** 初始步骤（缺项直达：缺 Key→keys、缺输出→output）；默认 welcome */
+  initialStep?: WizardInitialStep;
 }
 
 type StepId = "welcome" | "deps" | "keys" | "processing" | "output" | "features" | "review";
@@ -64,8 +66,11 @@ export function ConfigWizard({
   onSelectOutputDir,
   onOpenOutputDir,
   onOpenUrl,
+  initialStep,
 }: ConfigWizardProps) {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() =>
+    initialStep ? Math.max(0, STEPS.findIndex((s) => s.id === initialStep)) : 0
+  );
   const [config, setConfig] = useState<MyriadMindConfig>({ ...initialConfig });
   const [setupIntent, setSetupIntent] = useState<SetupIntent>("video");
 
@@ -146,7 +151,7 @@ export function ConfigWizard({
         {step === 1 && <DepsStep deps={deps} intent={setupIntent} onRecheck={onRecheckDeps} />}
         {step === 2 && <ApiKeysStep config={config} update={update} onOpenUrl={onOpenUrl} />}
         {step === 3 && <ProcessingStep config={config} update={update} intent={setupIntent} />}
-        {step === 4 && <OutputStep config={config} update={update} onSelectDir={onSelectOutputDir} />}
+        {step === 4 && <OutputStep config={config} update={update} onSelectDir={onSelectOutputDir} onOpenOutputDir={onOpenOutputDir} />}
         {step === 5 && <FeaturesStep config={config} update={update} />}
         {step === 6 && <ReviewStep config={config} intent={setupIntent} deps={deps} />}
       </div>
@@ -636,11 +641,12 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
 // ============================================================
 
 function OutputStep({
-  config, update, onSelectDir,
+  config, update, onSelectDir, onOpenOutputDir,
 }: {
   config: MyriadMindConfig;
   update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
   onSelectDir?: () => Promise<string | null>;
+  onOpenOutputDir?: (dir: string) => void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

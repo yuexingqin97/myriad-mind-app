@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { type MyriadMindConfig } from "@myriad-mind/core";
-import { ConfigWizard, SettingsPage, type DepsInfo, type ThemeMode } from "@myriad-mind/ui";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { type MyriadMindConfig, type SetupStatus } from "@myriad-mind/core";
+import { ConfigWizard, SettingsPage, type DepsInfo, type ThemeMode, type WizardInitialStep } from "@myriad-mind/ui";
 import * as api from "@/api";
 import type { DepResult } from "@/api";
 
@@ -14,6 +14,8 @@ interface SettingsViewProps {
   onSave: (c: MyriadMindConfig) => void;
   /** 设置页字段变更（直接改 App 内存 config，useConfig debounce 自动写盘） */
   update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
+  /** 配置就绪状态（驱动向导缺项直达 + 非首启 needs_config 自动开向导） */
+  setupStatus: SetupStatus;
   firstLaunch: boolean;
   onFinishWizard: () => void;
   /** 导航到炼化页（完成向导后） */
@@ -29,7 +31,7 @@ function toDepInfo(d: DepResult | undefined) {
 
 // ---- Component ----
 
-export function SettingsView({ config, onSave, update, firstLaunch, onFinishWizard, onNavigateToInput }: SettingsViewProps) {
+export function SettingsView({ config, onSave, update, setupStatus, firstLaunch, onFinishWizard, onNavigateToInput }: SettingsViewProps) {
   const [showWizard, setShowWizard] = useState(firstLaunch);
   const [deps, setDeps] = useState<DepsInfo | undefined>(undefined);
   const { theme, setTheme } = useTheme();
@@ -51,6 +53,19 @@ export function SettingsView({ config, onSave, update, firstLaunch, onFinishWiza
   useEffect(() => {
     detectDeps();
   }, [detectDeps]);
+
+  // 缺项直达：缺 DeepSeek Key → keys 步，缺输出目录 → output 步，否则 welcome
+  const wizardInitialStep: WizardInitialStep = !config.deepseek_api_key?.trim() ? "keys"
+    : !config.output.note_dir?.trim() ? "output" : "welcome";
+
+  // 非首启 + needs_config 时自动开一次向导（直达缺项步）；首启已由 useState(firstLaunch) 自动开
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoOpened.current && !firstLaunch && setupStatus === "needs_config") {
+      autoOpened.current = true;
+      setShowWizard(true);
+    }
+  }, [setupStatus, firstLaunch]);
 
   // 重置配置：删除 config.json，下次启动重新进入首启引导
   const handleResetConfig = useCallback(async () => {
@@ -76,19 +91,21 @@ export function SettingsView({ config, onSave, update, firstLaunch, onFinishWiza
       {showWizard ? (
         <ConfigWizard
           config={config}
+          initialStep={wizardInitialStep}
           onSave={(c, action) => {
             onSave(c);
+            onFinishWizard();      // 结束首启向导态（firstLaunch=false）
+            setShowWizard(false);  // 关闭向导，回到 SettingsPage
             if (action === "go_input") {
-              onNavigateToInput?.();
-            } else {
-              onFinishWizard();
+              onNavigateToInput?.(); // 跳炼化页
             }
+            // stay_settings：留在设置页（view 已是 settings），由 setShowWizard(false) 切到 SettingsPage
           }}
           onCancel={() => { setShowWizard(false); onFinishWizard(); }}
           deps={deps}
           onRecheckDeps={detectDeps}
           onSelectOutputDir={async () => api.pickFolder()}
-          onOpenOutputDir={() => { /* TBD */ }}
+          onOpenOutputDir={(dir) => { if (dir) api.openPath(dir); }}
           onOpenUrl={handleOpenUrl}
         />
       ) : (
@@ -101,7 +118,7 @@ export function SettingsView({ config, onSave, update, firstLaunch, onFinishWiza
             onOpenWizard={() => setShowWizard(true)}
             onResetConfig={handleResetConfig}
             onSelectOutputDir={async () => api.pickFolder()}
-            onOpenOutputDir={() => { /* TBD: open in explorer */ }}
+            onOpenOutputDir={(dir) => { if (dir) api.openPath(dir); }}
             onOpenCacheDir={() => api.openCacheDir()}
             theme={theme}
             onThemeChange={setTheme}

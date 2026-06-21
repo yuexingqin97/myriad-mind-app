@@ -46,6 +46,7 @@ export type {
   DepInfo,
   DepsInfo,
   SetupIntent,
+  WizardInitialStep,
   HealthStatus,
   HealthItem,
 } from "./types.js";

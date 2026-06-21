@@ -27,8 +27,8 @@ export interface SettingsPageProps {
   onResetConfig?: () => void;
   /** 选择输出目录 */
   onSelectOutputDir?: () => Promise<string | null>;
-  /** 打开输出目录 */
-  onOpenOutputDir?: () => void;
+  /** 打开输出目录（传目录路径，调系统文件管理器） */
+  onOpenOutputDir?: (dir: string) => void;
   /** 打开缓存目录 */
   onOpenCacheDir?: () => void;
   /** config.json 路径 */
@@ -455,7 +455,7 @@ function OutputTab({
   config: MyriadMindConfig;
   update: <K extends keyof MyriadMindConfig>(key: K, value: MyriadMindConfig[K]) => void;
   onSelectDir?: () => Promise<string | null>;
-  onOpenDir?: () => void;
+  onOpenDir?: (dir: string) => void;
   onOpenCacheDir?: () => void;
 }) {
   return (

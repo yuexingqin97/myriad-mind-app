@@ -232,6 +232,19 @@ export async function openExternalUrl(url: string): Promise<void> {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+// ---- 打开本地路径（输出目录等，调系统文件管理器）----
+
+export async function openPath(path: string): Promise<void> {
+  if (await ensureTauri()) {
+    try {
+      const { openPath } = await import("@tauri-apps/plugin-opener");
+      await openPath(path);
+    } catch (e) {
+      console.warn("[myriad-mind] openPath 失败", e);
+    }
+  }
+}
+
 
 export interface MindStreamEvent {
   type: "start" | "reasoning_delta" | "delta" | "usage" | "done" | "error";

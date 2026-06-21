@@ -27,6 +27,9 @@ export interface DepsInfo {
 /** 用户使用意图 — 仅 UI 状态，不入 config.json */
 export type SetupIntent = "video" | "local_media" | "article" | "code";
 
+/** 配置向导初始步骤（缺项直达：缺 Key→keys、缺输出目录→output） */
+export type WizardInitialStep = "welcome" | "deps" | "keys" | "processing" | "output" | "features" | "review";
+
 // ---- 配置健康度 ----
 
 export type HealthStatus = "ok" | "warning" | "error" | "unconfigured";

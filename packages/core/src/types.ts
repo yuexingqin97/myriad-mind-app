@@ -118,6 +118,14 @@ export interface MyriadMindConfig {
   post_process: PostProcessConfig;
 }
 
+// ---- 配置就绪状态机（useConfig 计算，驱动首页空态/向导直达/提交守卫）----
+export type SetupStatus =
+  | "checking"            // 启动中，正在读 config.json / Schema / Key
+  | "ready"              // config.json 存在 + Schema 通过 + DeepSeek Key 非空
+  | "needs_config"       // config.json 不存在，或缺 DeepSeek Key（需引导配置）
+  | "invalid_config"     // config.json 存在但 Schema 校验失败
+  | "backend_unavailable"; // 非 Tauri 环境（浏览器 dev mock）
+
 // ---- 笔记类型 ----
 export type NoteType = "video" | "article" | "audio" | "code" | "compare";
 
