@@ -36,7 +36,7 @@
     ],
     "resources": [
       "../../../scripts/*.py",
-      "prompts/**/*.md"
+      "../../../packages/core/prompts/**/*.md"
     ]
   }
 }

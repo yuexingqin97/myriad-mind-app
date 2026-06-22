@@ -3,7 +3,8 @@
 // ============================================================
 
 use super::types::{
-    AiErrorKind, MindRequest, MindResponse, MindStreamEvent, ReasoningEffort, TokenUsage,
+    AgentTurnResult, AiErrorKind, MindRequest, MindResponse, MindStreamEvent, ReasoningEffort,
+    ThinkingConfig, TokenUsage, ToolCall,
 };
 use crate::error::AppError;
 use reqwest::Client;
@@ -289,6 +290,144 @@ pub async fn stream_deepseek(
         },
         provider: "deepseek".into(),
         model: model.into(),
+        usage,
+        finish_reason,
+    })
+}
+
+/// 非流式 chat（带 tools）—— agent loop 用（设计文档 §6.1）。
+///
+/// 与 stream_deepseek 的区别：stream=false，解析 choices[0].message（含 tool_calls）。
+/// 用非流式是因为 tool_use 的流式累积（delta.tool_calls 分片 JSON）复杂且本项目未验证；
+/// agent 多轮决策用非流式更可靠，最终笔记内容由 runner 经 mind-stream 发出。
+pub async fn chat_turn(
+    _app_handle: &AppHandle,
+    system_prompt: &str,
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
+    thinking: Option<&ThinkingConfig>,
+    api_key: &str,
+) -> Result<AgentTurnResult, AppError> {
+    let client = Client::new();
+    let model = "deepseek-v4-pro";
+
+    let mut all_messages = vec![serde_json::json!({ "role": "system", "content": system_prompt })];
+    all_messages.extend_from_slice(messages);
+
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": all_messages,
+        "stream": false,
+        "max_tokens": 131072,
+    });
+    if !tools.is_empty() {
+        body["tools"] = serde_json::json!(tools);
+    }
+    if let Some(thinking) = thinking {
+        if thinking.enabled {
+            body["thinking"] = serde_json::json!({ "type": "enabled" });
+            if let Some(effort) = &thinking.effort {
+                body["reasoning_effort"] = match effort {
+                    ReasoningEffort::High => serde_json::json!("high"),
+                    ReasoningEffort::Max => serde_json::json!("max"),
+                };
+            }
+        }
+    }
+
+    let prompt_chars: usize = all_messages
+        .iter()
+        .map(|m| {
+            m.get("content")
+                .and_then(|v| v.as_str())
+                .map(|s| s.chars().count())
+                .unwrap_or(0)
+        })
+        .sum();
+    log::debug!(
+        target: "agent",
+        "[llm] phase=chat_turn model={model} tools={} messages={} prompt_chars={prompt_chars}",
+        tools.len(),
+        all_messages.len()
+    );
+
+    let req_start = std::time::Instant::now();
+    let response = client
+        .post(format!("{BASE_URL}{CHAT_ENDPOINT}"))
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| AppError::Ai {
+            kind: if e.is_timeout() { "timeout" } else { "network" }.into(),
+            message: e.to_string(),
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body_text = response.text().await.unwrap_or_default();
+        let kind = AiErrorKind::classify(Some(status.as_u16()), &body_text);
+        log::warn!(
+            target: "agent",
+            "[llm] phase=chat_turn_error status={} kind={} duration_ms={}",
+            status.as_u16(),
+            kind,
+            req_start.elapsed().as_millis()
+        );
+        return Err(AppError::Ai {
+            kind: kind.to_string(),
+            message: body_text,
+        });
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| AppError::Ai {
+            kind: "invalid_response".into(),
+            message: format!("响应 JSON 解析失败: {e}"),
+        })?;
+
+    let choice = &json["choices"][0];
+    let message = choice["message"].clone();
+    let finish_reason = choice["finish_reason"].as_str().map(String::from);
+    let content = message["content"].as_str().map(String::from);
+    let reasoning_content = message["reasoning_content"].as_str().map(String::from);
+
+    let tool_calls: Vec<ToolCall> = message["tool_calls"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| serde_json::from_value::<ToolCall>(t.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let usage = json.get("usage").map(|u| TokenUsage {
+        input_tokens: u["input_tokens"].as_u64().unwrap_or(0) as u32,
+        output_tokens: u["output_tokens"].as_u64().unwrap_or(0) as u32,
+        reasoning_tokens: u["completion_tokens_details"]
+            .get("reasoning_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+    });
+
+    log::debug!(
+        target: "agent",
+        "[llm] phase=chat_turn_done finish={:?} tool_calls={} duration_ms={} total_tokens={}",
+        finish_reason,
+        tool_calls.len(),
+        req_start.elapsed().as_millis(),
+        usage.as_ref().map(|u| u.total_tokens).unwrap_or(0)
+    );
+
+    Ok(AgentTurnResult {
+        message,
+        content,
+        tool_calls,
+        reasoning_content,
         usage,
         finish_reason,
     })

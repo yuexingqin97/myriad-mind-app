@@ -35,12 +35,23 @@ fn prompts_dir() -> PathBuf {
 }
 
 fn find_prompts_dir_from(start: &Path) -> Option<PathBuf> {
-    for dir in start.ancestors() {
-        for candidate in [
-            dir.join("prompts"),
-            dir.join("Resources").join("prompts"),
-            dir.join("resources").join("prompts"),
-        ] {
+    // 相对路径优先级（外层是路径优先级，内层遍历 ancestors）：
+    //   packages/core/prompts —— 共享单一源（dev 源路径；prod 打包若保留该结构也命中）
+    //   prompts / Resources/prompts / resources/prompts —— 旧位置 / prod 打包展平位置
+    // 把共享源放最高优先级：即便旧 src-tauri/prompts 仍残留在磁盘上，
+    // ancestors 遍历时 packages/core/prompts 也会先于散落的 prompts/ 命中。
+    let rel_paths: &[&[&str]] = &[
+        &["packages", "core", "prompts"],
+        &["prompts"],
+        &["Resources", "prompts"],
+        &["resources", "prompts"],
+    ];
+    for rel in rel_paths {
+        for dir in start.ancestors() {
+            let mut candidate = dir.to_path_buf();
+            for component in *rel {
+                candidate.push(component);
+            }
             if candidate.join(SENTINEL).exists() {
                 return Some(candidate);
             }

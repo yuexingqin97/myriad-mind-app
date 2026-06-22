@@ -196,6 +196,43 @@ impl AiErrorKind {
 }
 
 // ============================================================
+// Agent tool use 类型（OpenAI 兼容 tool calling，设计文档 §6.1）
+// ============================================================
+
+/// 模型发起的一次工具调用里的 function 部分。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolCallFunction {
+    /// 工具名
+    pub name: String,
+    /// 模型生成的参数（JSON 字符串，需再 parse）
+    pub arguments: String,
+}
+
+/// 一次工具调用（OpenAI tool_calls 数组元素）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
+    pub function: ToolCallFunction,
+}
+
+/// 非流式 chat（带 tools）一轮的结果：assistant message 解析。
+#[derive(Debug, Clone)]
+pub struct AgentTurnResult {
+    /// 完整 assistant message（可直接 push 回 messages，含 tool_calls）
+    pub message: serde_json::Value,
+    /// 正文（终止轮的最终笔记；工具轮通常为空）
+    pub content: Option<String>,
+    /// 工具调用清单（空 Vec = 终止轮）
+    pub tool_calls: Vec<ToolCall>,
+    #[allow(dead_code)]
+    pub reasoning_content: Option<String>,
+    pub usage: Option<TokenUsage>,
+    pub finish_reason: Option<String>,
+}
+
+// ============================================================
 // 视觉功能类型 (DeepSeek V4 Vision)
 // ============================================================
 
