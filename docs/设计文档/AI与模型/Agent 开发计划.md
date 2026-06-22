@@ -344,6 +344,46 @@ packages/core/prompts/agent/charter.md   # agent charter 模板（Phase 0 后的
 | Phase 2 Agent Loop | ✅ | cargo check ✓ | `agent/{runner,charter,context,mod}` + `deepseek::chat_turn` + `agent/charter.md`；六阶段骨架 + TaskState + 护栏(MAX_STEPS) + 分块流式发出 |
 | Phase 3 接线删旧 | ✅ | cargo check ✓（0 error） | `execute_pipeline` 改调度 agent；`persist_note` 落盘；删 `run_{video,audio,text}_pipeline` + 专属 helper + `engine::generate_note`；前端兼容性已核查 |
 
+### 对抗审查与修复（2026-06-22）
+
+> find→verify 对抗审查工作流：8 维度并行找 bug → 每条发现独立验证（默认反驳）→ 汇总确认项。**41 条发现，31 条确认**（3 critical / 3 high / 11 medium / 14 low），6 反驳，1 不确定。**已修复全部 critical + high + 8 个 medium**（15 处），`cargo check` 0 错误。
+
+**已修复：**
+
+| 级别 | finding | 修复 |
+|------|---------|------|
+| 🔴 critical | api_key 经 `download_video` 失败 stderr 泄漏给 DeepSeek | `python.rs::run_python_script` 返回前 `redact_secrets`（源头堵 → AppError Display / 日志 / LLM 回喂全清） |
+| 🔴 critical | `read_file`/`write_note`/`read_artifact`/`scan_*` 路径完全由 LLM 控制，可读 `~/.ssh` 写任意路径 | `ToolContext` 加沙箱：`resolve_within`（写锁 note_dir 子树）/ `resolve_readable`（读限 temp/artifacts/note_dir/input_root） |
+| 🔴 critical | keyframes PNG/json 实际在 `output_dir/frames/`，handler 找错目录 | `ExtractKeyframes` 改数 `frames/` 子目录、artifact 指向它（ReviewKeyframes 随之对齐） |
+| 🟠 high | api_key 经 runner `log::warn!{e}` 写日志 + Webview devtools | 同 redaction 源头修复覆盖 |
+| 🟠 high | `query_ai_douyin` 失败日志打印含 key 的 stderr | 同 redaction 源头修复覆盖 |
+| 🟠 high | `task_state_yaml` 含反引号会破坏 charter ` ```yaml ` 围栏 | `context.rs::to_yaml` 消毒反引号 |
+| 🟡 medium | usage 字段名 `input_tokens` vs `prompt_tokens` | 双兼容（`input_tokens`/`prompt_tokens`、`output_tokens`/`completion_tokens` 都试） |
+| 🟡 medium | MAX_STEPS 触顶丢弃 `write_note` 已写的笔记 | 空 `final_content` 时回收 Draft artifact |
+| 🟡 medium | `persist_note` 失败短路，泄漏 GB 级 temp | 清理提前到 persist 之前（persist 只读内存 content，不依赖 temp） |
+| 🟡 medium | `ai_category` 全角冒号导致分类回落「未分类」 | 兼容半角 `:` / 全角 `：` |
+| 🟡 medium | done 事件提前 `finishPipeline`，丢失 save/cleanup 进度并提前结束 processing | done 用 `event.text` 归档、不在 done 收尾；改由 completed progress / invoke resolve 收尾；runner 去掉冗余 completed emit |
+| 🟡 medium | assistant `content` 为 null 可能被端点拒收 | push 前归一化 null → "" |
+| ⚪ low | args 解析失败 fallback `{}` 浪费一轮 | 失败回喂诊断（含原始参数）+ `continue` 跳过 dispatch |
+
+**暂缓（13 项，low / 特性缺口，均不阻塞）：**
+
+- `cancel` 未接 Tauri 命令（medium 特性，原管线亦无）—— runner 有检查点，外部置位逻辑待补。
+- token 统计逐轮累加 `total_tokens`（重复计入历史 input，虚高，low 统计）。
+- charter 每轮重渲染 / `TaskState.phase` 恒 `Acquire`（low，phase 仅信息性）。
+- `reqwest::Client` 每次新建（low 性能，未复用连接池）。
+- `max_tokens=131072` 可能触发 length 错误（low，DeepSeek 单次输出上限更高）。
+- `ToolRegistry::get/has` 未用、`AgentResult.note_path` / `TaskState.open_issues` 字段未读（low 死代码/预留 API）。
+- `Phase` 用 `{:?}` 输出 `Acquire` 与 serde `snake_case` 不一致（low，仅 LLM 文本）。
+- 前端未消费 `PipelineResult.note_path`（low UX，完成后无法一键打开笔记）。
+- `write_note` 可能与 `persist_note` 双写（low，charter 已约束 agent 不用 write_note 存最终笔记）。
+- `validate_pipeline_deps` 按 InputMode 校验与 agent 目标驱动脱节（low，best-effort 早退）。
+- mode 字符串拼接构造 JSON 解析回落 ArticleUrl（low，IPC 来自自家前端）。
+
+**安全修复待验证：** api_key 脱敏 + 路径沙箱建议构造失败场景（错误 douyin URL；agent 被诱导读 note_dir 外路径）跑一次，确认日志/LLM 回喂无明文 key、越界访问被拒。
+
+---
+
 ### 实现偏离与简化（均标注于代码注释）
 
 1. **媒体函数 `pub(crate)` 原地共享** —— 未物理搬到 `commands/tools/media/`（降低无运行时验证下的 churn 风险），功能等价；物理搬移留作后续。
