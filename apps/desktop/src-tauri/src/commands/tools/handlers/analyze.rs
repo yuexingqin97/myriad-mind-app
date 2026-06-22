@@ -59,28 +59,30 @@ impl ToolHandler for ExtractKeyframesHandler {
                 guided,
             )?;
 
-            // 3. 统计输出目录下 .png 数量
-            std::fs::create_dir_all(&output_dir).map_err(AppError::Io)?;
+            // 3. extract_keyframes.py 把 PNG + keyframes.json 落在 output_dir/frames/ 子目录
+            //    （脚本内 frames_dir = output_dir/"frames"）。统计该子目录下 .png 数量。
+            let frames_dir = output_dir.join("frames");
             let mut frame_count: u64 = 0;
-            for entry in std::fs::read_dir(&output_dir).map_err(AppError::Io)? {
-                let entry = entry.map_err(AppError::Io)?;
-                if entry.path().extension().and_then(|e| e.to_str()) == Some("png") {
-                    frame_count += 1;
+            if let Ok(entries) = std::fs::read_dir(&frames_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().and_then(|e| e.to_str()) == Some("png") {
+                        frame_count += 1;
+                    }
                 }
             }
 
-            // 4. 构造 artifact 引用：每帧粗估 500 token
+            // 4. artifact 指向 frames 子目录（含 png + keyframes.json，供 review_keyframes 用）
             let tokens_estimate = frame_count.saturating_mul(500);
             let art = ArtifactRef {
                 id: "keyframes/".into(),
-                path: output_dir.clone(),
+                path: frames_dir.clone(),
                 kind: ArtifactKind::Screenshots,
                 tokens_estimate,
                 summary: format!("{frame_count} 帧截图"),
             };
 
             Ok(ToolOutput::artifact(
-                format!("已抽取 {frame_count} 帧关键帧，存于 {}", output_dir.display()),
+                format!("已抽取 {frame_count} 帧关键帧，存于 {}", frames_dir.display()),
                 art,
             ))
         })

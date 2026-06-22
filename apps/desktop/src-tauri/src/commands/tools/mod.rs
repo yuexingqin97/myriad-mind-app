@@ -12,7 +12,7 @@
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use tauri::AppHandle;
 
@@ -38,12 +38,83 @@ pub struct ToolContext {
     pub artifacts_dir: PathBuf,
     /// 笔记输出根目录（write_note / memory.md / 知识库索引）
     pub note_dir: String,
+    /// 用户输入对应的本地路径（local_text/local_video/code_project 等模式），
+    /// 作为 read 类工具的可信读取根之一；URL 输入为 None。
+    pub input_root: Option<PathBuf>,
 }
 
 impl ToolContext {
     /// 计算/确保 artifacts_dir 存在（agent 启动时调用）
     pub fn ensure_artifacts_dir(&self) -> Result<(), AppError> {
         std::fs::create_dir_all(&self.artifacts_dir).map_err(AppError::Io)
+    }
+
+    /// 可信读取根：temp_dir / artifacts_dir / note_dir / input_root。
+    /// read_file / scan_directory / scan_code_project / read_artifact 的路径必须落在其中之一，
+    /// 防止 prompt injection 诱导 agent 读取 ~/.ssh/id_rsa、.env 等敏感文件（对抗审查 critical）。
+    fn read_roots(&self) -> Vec<PathBuf> {
+        let mut roots = vec![
+            self.temp_dir.clone(),
+            self.artifacts_dir.clone(),
+            PathBuf::from(&self.note_dir),
+        ];
+        if let Some(r) = &self.input_root {
+            roots.push(r.clone());
+        }
+        roots
+    }
+
+    /// 把 requested 解析到 base 子树内（写沙箱）。绝对路径直接用，相对路径基于 base。
+    /// canonicalize 后校验 starts_with(base)；目标尚不存在（写场景）时用 parent canonicalize + file_name。
+    /// 越界或非法 → Err。write_note 用此方法锁定写入 note_dir。
+    pub fn resolve_within(&self, base: &Path, requested: &str) -> Result<PathBuf, AppError> {
+        let base_c = base.canonicalize().map_err(AppError::Io)?;
+        let p = if Path::new(requested).is_absolute() {
+            PathBuf::from(requested)
+        } else {
+            base.join(requested)
+        };
+        let resolved = match p.canonicalize() {
+            Ok(c) => c,
+            Err(_) => {
+                // 目标文件可能尚不存在（write_note），用 parent canonicalize + file_name 兜底
+                let parent = p.parent().unwrap_or(Path::new("."));
+                let parent_c = parent.canonicalize().map_err(AppError::Io)?;
+                let fname = p
+                    .file_name()
+                    .ok_or_else(|| AppError::Other("无效文件名".into()))?;
+                parent_c.join(fname)
+            }
+        };
+        if !resolved.starts_with(&base_c) {
+            return Err(AppError::Other(format!(
+                "路径越界，拒绝写入 note_dir 之外: {requested}"
+            )));
+        }
+        Ok(resolved)
+    }
+
+    /// 可读路径解析：允许落在任一 read_roots 子树。越界 → Err。
+    pub fn resolve_readable(&self, requested: &str) -> Result<PathBuf, AppError> {
+        for base in self.read_roots() {
+            // base 可能尚不存在（如 input_root 被删），canonicalize 失败则跳过该根
+            let Ok(base_c) = base.canonicalize() else {
+                continue;
+            };
+            let p = if Path::new(requested).is_absolute() {
+                PathBuf::from(requested)
+            } else {
+                base.join(requested)
+            };
+            if let Ok(resolved) = p.canonicalize() {
+                if resolved.starts_with(&base_c) {
+                    return Ok(resolved);
+                }
+            }
+        }
+        Err(AppError::Other(format!(
+            "路径不在允许的读取范围（temp/artifacts/note_dir/输入路径）内: {requested}"
+        )))
     }
 }
 
@@ -91,7 +162,7 @@ pub struct ToolSpec {
 // ============================================================
 
 /// artifact 类型。大结果落盘后用 ArtifactRef 引用，不在 messages 里放全文。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {
     Transcript,

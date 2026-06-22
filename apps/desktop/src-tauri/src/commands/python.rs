@@ -329,7 +329,10 @@ pub async fn run_python_script(
     Ok(PythonScriptResult {
         success,
         stdout,
-        stderr,
+        // 返回前脱敏：run_and_parse 会把 stderr 拼进 AppError::PythonScript 的 Display，
+        // 而 runner 会把该 Display 回喂给 LLM（messages role:tool）+ 写进日志。
+        // 必须在源头脱敏，堵住 --api-key 经 argparse 报错回显泄漏给 DeepSeek/日志的红线。
+        stderr: redact_secrets(&stderr),
         exit_code,
     })
 }

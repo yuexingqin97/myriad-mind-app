@@ -247,6 +247,11 @@ export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePip
           setProgressDetail(`❌ ${event.label}`);
           finishPipeline();
         }
+        // 真正的管线终点：pipeline.rs 在 save/cleanup 后发 step="completed"。
+        // 此时才收尾（done 事件已延迟到这里），避免提前拆监听器丢失后续进度。
+        if (event.step === "completed" && event.status === "completed") {
+          finishPipeline();
+        }
       });
 
       // Listen for mind-stream (DeepSeek unified events)
@@ -292,12 +297,15 @@ export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePip
             };
             break;
           case "done": {
-            // 归档剩余未归档文本
-            const remaining = streamAccumRef.current.slice(streamChunkedRef.current);
-            if (remaining) {
-              pushLog("output", remaining);
+            // 优先用后端 Done 携带的权威全文 event.text，accum 仅作回退
+            const finalText =
+              event.text && event.text.length > 0
+                ? event.text
+                : streamAccumRef.current.slice(streamChunkedRef.current);
+            if (finalText) {
+              pushLog("output", finalText);
             }
-            const totalChars = streamAccumRef.current.length;
+            const totalChars = finalText.length;
             const elapsed = ((Date.now() - aiStartRef.current) / 1000).toFixed(1);
             const u = lastUsageRef.current;
             const summaryParts = [`共 ${totalChars} 字符`, `⏱️ ${elapsed}s`];
@@ -308,7 +316,8 @@ export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePip
             streamChunkedRef.current = 0;
             setStreamingText("");
             setProgress(100);
-            finishPipeline();
+            // 不在此 finishPipeline：save/cleanup/completed 尚未到达，提前拆监听器会丢失进度
+            // 并提前结束 processing（对抗审查 frontend finding）。改由 completed progress / invoke 收尾。
             break;
             }
           case "error":
@@ -339,12 +348,13 @@ export function usePipeline({ config, setupStatus }: UsePipelineOptions): UsePip
           setProgress(100);
           setStatus(`✅ 炼化完成 — ${result.mode} · ${result.duration_seconds.toFixed(1)}s`);
         }
+        // 兜底收尾：completed progress 通常已触发 finishPipeline，此处幂等；
+        // 若后端异常未发 completed，这里保证 UI 不卡住。
+        finishPipeline();
       } catch (e) {
         pushLog("error", `管线执行失败: ${e}`);
         setStatus(`❌ 管线执行失败: ${e}`);
-        setProcessing(false);
-        unlisten();
-        unlistenStream();
+        finishPipeline();
       }
     } else {
       // ---- Mock pipeline (browser dev) ----

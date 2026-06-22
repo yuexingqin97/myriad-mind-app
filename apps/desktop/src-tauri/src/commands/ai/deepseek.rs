@@ -229,8 +229,14 @@ pub async fn stream_deepseek(
                     // 提取 usage（通常出现在最后一条消息中）
                     if let Some(u) = parsed.get("usage") {
                         usage = Some(TokenUsage {
-                            input_tokens: u["input_tokens"].as_u64().unwrap_or(0) as u32,
-                            output_tokens: u["output_tokens"].as_u64().unwrap_or(0) as u32,
+                            input_tokens: u["input_tokens"]
+                                .as_u64()
+                                .or_else(|| u["prompt_tokens"].as_u64())
+                                .unwrap_or(0) as u32,
+                            output_tokens: u["output_tokens"]
+                                .as_u64()
+                                .or_else(|| u["completion_tokens"].as_u64())
+                                .unwrap_or(0) as u32,
                             reasoning_tokens: u["completion_tokens_details"]
                                 .get("reasoning_tokens")
                                 .and_then(|v| v.as_u64())
@@ -405,8 +411,14 @@ pub async fn chat_turn(
         .unwrap_or_default();
 
     let usage = json.get("usage").map(|u| TokenUsage {
-        input_tokens: u["input_tokens"].as_u64().unwrap_or(0) as u32,
-        output_tokens: u["output_tokens"].as_u64().unwrap_or(0) as u32,
+        input_tokens: u["input_tokens"]
+            .as_u64()
+            .or_else(|| u["prompt_tokens"].as_u64())
+            .unwrap_or(0) as u32,
+        output_tokens: u["output_tokens"]
+            .as_u64()
+            .or_else(|| u["completion_tokens"].as_u64())
+            .unwrap_or(0) as u32,
         reasoning_tokens: u["completion_tokens_details"]
             .get("reasoning_tokens")
             .and_then(|v| v.as_u64())

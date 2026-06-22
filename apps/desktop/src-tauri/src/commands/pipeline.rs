@@ -154,29 +154,30 @@ pub async fn execute_pipeline(
         agent_result.total_tokens
     );
 
-    // 持久化笔记（解析 `> ai_category:` 决定子目录；标题取首行 #）
-    emit_progress(&app, "save", "💾 保存笔记", 92.0, "running", None);
-    let note_path = persist_note(&note_dir, note_category.as_deref(), &agent_result.note_content)?;
-    emit_progress(&app, "save", "笔记已保存", 94.0, "completed", Some(&note_path));
-
-    // 步骤 9: 清理
+    // 步骤 9: 清理临时文件——先于持久化执行，确保 persist_note 失败也不会泄漏 GB 级 temp。
+    // （persist_note 只读内存里的 note_content，不依赖 temp_dir，故清理顺序无副作用）
     let should_cleanup = cleanup_temp.unwrap_or(true);
     let video_id = generate_temp_id(&input);
     let temp_dir = std::env::temp_dir().join("myriad-mind").join(&video_id);
     if should_cleanup && temp_dir.exists() {
-        emit_progress(&app, "cleanup", "清理临时文件", 95.0, "running", None);
+        emit_progress(&app, "cleanup", "清理临时文件", 92.0, "running", None);
         let _ = std::fs::remove_dir_all(&temp_dir);
-        emit_progress(&app, "cleanup", "清理完成", 98.0, "completed", None);
+        emit_progress(&app, "cleanup", "清理完成", 94.0, "completed", None);
     } else if !should_cleanup && temp_dir.exists() {
         emit_progress(
             &app,
             "cleanup",
             "保留临时文件（按设置跳过清理）",
-            98.0,
+            94.0,
             "completed",
             Some(&format!("临时目录: {}", temp_dir.display())),
         );
     }
+
+    // 持久化笔记（解析 `> ai_category:` 决定子目录；标题取首行 #）
+    emit_progress(&app, "save", "💾 保存笔记", 95.0, "running", None);
+    let note_path = persist_note(&note_dir, note_category.as_deref(), &agent_result.note_content)?;
+    emit_progress(&app, "save", "笔记已保存", 98.0, "completed", Some(&note_path));
 
     // 完成
     let duration = start.elapsed().as_secs_f64();
@@ -213,10 +214,17 @@ fn persist_note(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .or_else(|| {
-            content
-                .lines()
-                .find_map(|l| l.trim().strip_prefix("> ai_category:").map(|s| s.trim().to_string()))
-                .filter(|s| !s.is_empty())
+            // 兼容半角 `:` 与全角 `：`（中文 LLM 易产出全角冒号，否则分类静默回落"未分类"）
+            content.lines().find_map(|l| {
+                let l = l.trim();
+                let rest = l.strip_prefix("> ai_category")?;
+                let rest = rest.trim_start_matches(&[':', '：'][..]).trim().to_string();
+                if rest.is_empty() {
+                    None
+                } else {
+                    Some(rest)
+                }
+            })
         })
         .unwrap_or_else(|| "未分类".to_string());
 

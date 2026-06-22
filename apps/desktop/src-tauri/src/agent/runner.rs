@@ -16,7 +16,7 @@ use crate::commands::ai::engine::read_deepseek_key;
 use crate::commands::ai::types::{MindStreamEvent, ReasoningEffort, ThinkingConfig};
 use crate::commands::pipeline::{emit_progress, generate_temp_id};
 use crate::commands::tools::registry::ToolRegistry;
-use crate::commands::tools::{ToolContext, ToolSpec};
+use crate::commands::tools::{ArtifactKind, ToolContext, ToolSpec};
 use crate::error::AppError;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -68,12 +68,22 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
     std::fs::create_dir_all(&temp_dir).map_err(AppError::Io)?;
     std::fs::create_dir_all(&artifacts_dir).map_err(AppError::Io)?;
 
+    // input_root：本地输入（文件/目录）作为 read 类工具的可信读取根；URL 输入为 None
+    let input_root = {
+        let p = std::path::Path::new(&req.input);
+        if p.exists() {
+            Some(p.to_path_buf())
+        } else {
+            None
+        }
+    };
     let ctx = ToolContext {
         app: app.clone(),
         python_path: req.python_path.clone(),
         temp_dir: temp_dir.clone(),
         artifacts_dir: artifacts_dir.clone(),
         note_dir: req.note_dir.clone(),
+        input_root,
     };
 
     // 阶段 0 回忆：加载知识库记忆 + 知识库索引摘要
@@ -145,12 +155,22 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
             req.task_prompt.as_deref(),
         )?;
 
-        let turn =
+        let mut turn =
             chat_turn(app, &system_prompt, &messages, &tools_for_llm, Some(&thinking), &api_key)
                 .await?;
 
         if let Some(u) = &turn.usage {
             total_tokens += u.total_tokens as u64;
+        }
+
+        // 部分 OpenAI 兼容端点要求 assistant.content 为字符串（非 null），归一化避免拒收
+        if turn
+            .message
+            .get("content")
+            .map(|c| c.is_null())
+            .unwrap_or(false)
+        {
+            turn.message["content"] = serde_json::json!("");
         }
 
         if turn.tool_calls.is_empty() {
@@ -181,17 +201,28 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
                 None,
             );
 
-            // 解析参数（模型给的 arguments 是 JSON 字符串）
-            let params: serde_json::Value =
-                serde_json::from_str(&tc.function.arguments).unwrap_or_else(|e| {
+            // 解析参数（模型给的 arguments 是 JSON 字符串）。失败则回喂诊断 + 跳过本次 dispatch，
+            // 避免空对象 {} 命中 require_str 后无谓消耗一轮（对抗审查 finding）
+            let params: serde_json::Value = match serde_json::from_str(&tc.function.arguments) {
+                Ok(v) => v,
+                Err(e) => {
                     log::warn!(
                         target: "agent",
                         "[agent] tool {} args parse failed: {e}; raw={}",
                         tc.function.name,
                         tc.function.arguments
                     );
-                    serde_json::json!({})
-                });
+                    messages.push(serde_json::json!({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": format!(
+                            "⚠️ 工具 {} 的 arguments 不是合法 JSON（{}）。\n原始参数：{}\n请重新输出合法 JSON object。",
+                            tc.function.name, e, tc.function.arguments
+                        ),
+                    }));
+                    continue;
+                }
+            };
 
             // 执行工具（失败回喂错误让 agent 自修，见 §6.4）
             let result_text = match registry
@@ -219,7 +250,8 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
                         "[agent] tool {} failed: {e}",
                         tc.function.name
                     );
-                    // 回喂错误（脱敏：AppError Display 不含密钥；list_ai_douyin 的 stderr 已在 handler 脱敏）
+                    // 回喂错误。stderr 已在 python.rs 源头脱敏（redact_secrets），不含明文 api_key；
+                    // 其他 AppError 变体（Config/Other）只含路径/消息，无密钥。
                     format!("⚠️ 工具 {} 执行失败：{}", tc.function.name, e)
                 }
             };
@@ -233,9 +265,44 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
     }
 
     if final_content.trim().is_empty() {
-        return Err(AppError::Other(format!(
-            "agent 在 {MAX_STEPS} 步内未产出最终笔记（可能陷入工具循环，请检查日志）"
-        )));
+        // 兜底：agent 可能用 write_note 落盘后未再发纯文本收尾轮（或触顶 MAX_STEPS），
+        // 此时 final_content 为空但 Draft artifact 已在盘上——回收它作为最终笔记，避免白跑一轮报错。
+        if let Some(draft) = task_state
+            .artifact_refs
+            .iter()
+            .rev()
+            .find(|a| a.kind == ArtifactKind::Draft)
+        {
+            match std::fs::read_to_string(&draft.path) {
+                Ok(c) if !c.trim().is_empty() => {
+                    log::warn!(
+                        target: "agent",
+                        "[agent] final_content 为空，回收 Draft artifact: {}",
+                        draft.path.display()
+                    );
+                    final_content = c;
+                }
+                Ok(_) => {
+                    return Err(AppError::Other(format!(
+                        "agent 已写入 Draft 但内容为空: {}（path={}）",
+                        draft.id,
+                        draft.path.display()
+                    )));
+                }
+                Err(e) => {
+                    return Err(AppError::Other(format!(
+                        "agent 标记已产出 Draft 但读取失败: {e}（path={}）",
+                        draft.path.display()
+                    )));
+                }
+            }
+        } else {
+            return Err(AppError::Other(format!(
+                "agent 在 {MAX_STEPS} 步内未产出最终笔记，task_state.artifact_refs 中也无 Draft\
+                 （已产出 {} 个 artifact，可能陷入工具循环，请检查日志）",
+                task_state.artifact_refs.len()
+            )));
+        }
     }
 
     // 通过 mind-stream 分块发出最终笔记（匹配前端增量累积逻辑，每 ~1500 字一帧；
@@ -259,7 +326,8 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
         },
     );
 
-    emit_progress(app, "completed", "炼化完成 ✅", 100.0, "completed", None);
+    // 不在此 emit "completed"——pipeline.rs 在 save/cleanup 之后才发真正的 step="completed"，
+    // 这里提前发会让前端误判管线结束（对抗审查 frontend finding）。
 
     Ok(AgentResult {
         note_content: final_content,

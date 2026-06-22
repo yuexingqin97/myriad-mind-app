@@ -425,7 +425,8 @@ impl ToolHandler for ScanCodeProjectHandler {
         Box::pin(async move {
             // 1. 解析参数
             let path = require_str(&params, "path")?;
-            let root = PathBuf::from(&path);
+            // 沙箱：限制在可信读取根（input_root/temp/artifacts/note_dir）内
+            let root = ctx.resolve_readable(&path)?;
 
             // 2. 扫描（max_depth=5）+ 格式化
             let scan = scan_code_project(&root, 5)?;
@@ -482,13 +483,15 @@ impl ToolHandler for ReadFileHandler {
         }
     }
 
-    fn handle<'a>(&'a self, _ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
+    fn handle<'a>(&'a self, ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
         Box::pin(async move {
             // 1. 解析参数
             let path = require_str(&params, "path")?;
+            // 沙箱：限制在可信读取根内（防 prompt injection 读敏感文件）
+            let resolved = ctx.resolve_readable(&path)?;
 
             // 2. 读全文（复用 fs::read_text_file 命令）
-            let content = read_text_file(path).await?;
+            let content = read_text_file(resolved.to_string_lossy().to_string()).await?;
             let char_count = content.chars().count();
 
             // 3. 小文件直接回；大文件截断前 2000 字符预览
@@ -535,13 +538,15 @@ impl ToolHandler for ScanDirectoryHandler {
         }
     }
 
-    fn handle<'a>(&'a self, _ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
+    fn handle<'a>(&'a self, ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
         Box::pin(async move {
             // 1. 解析参数
             let path = require_str(&params, "path")?;
+            // 沙箱：限制在可信读取根内
+            let resolved = ctx.resolve_readable(&path)?;
 
             // 2. 扫描（复用 fs::scan_directory，内部递归 2 层 + 文件类型分类）
-            let result = scan_directory(path).await?;
+            let result = scan_directory(resolved.to_string_lossy().to_string()).await?;
 
             // 3. 格式化目录树为文本摘要（目录树通常不大，不落盘 artifact）
             let mut lines = Vec::with_capacity(result.files.len() + 4);

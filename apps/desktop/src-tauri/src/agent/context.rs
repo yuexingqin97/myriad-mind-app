@@ -65,5 +65,8 @@ impl TaskState {
             "phase: {:?}\ninput: {}\nartifacts:\n{}\ndecisions:\n{}",
             self.phase, self.input_summary, arts, decisions
         )
+        // 消毒反引号：charter.md 把 task_state_yaml 包在 ```yaml 围栏里，
+        // 若内容含反引号会过早闭合围栏破坏 charter 结构（对抗审查 high 级 finding）。
+        .replace('`', "'")
     }
 }

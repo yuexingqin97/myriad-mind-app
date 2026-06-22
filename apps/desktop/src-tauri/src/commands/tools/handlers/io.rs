@@ -45,32 +45,32 @@ impl ToolHandler for WriteNoteHandler {
         }
     }
 
-    fn handle<'a>(&'a self, _ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
+    fn handle<'a>(&'a self, ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
         Box::pin(async move {
             // 1. 解析参数
             let path = require_str(&params, "path")?;
             let content = require_str(&params, "content")?;
 
-            // 2. 落盘（复用 fs::write_note，内部会 create_dir_all 父目录）
-            write_note(path.clone(), content.clone()).await?;
+            // 2. 沙箱：锁定写入 note_dir 子树（绝对/相对路径都解析到 note_dir 内，防越权写）
+            let resolved: PathBuf = ctx.resolve_within(std::path::Path::new(&ctx.note_dir), &path)?;
+            write_note(resolved.to_string_lossy().to_string(), content.clone()).await?;
 
             // 3. 构造 Draft artifact 引用
-            let path_buf = PathBuf::from(&path);
-            let id = path_buf
+            let id = resolved
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.clone());
+                .unwrap_or_else(|| resolved.to_string_lossy().to_string());
             let char_count = content.chars().count();
             let artifact = ArtifactRef {
                 id,
-                path: path_buf,
+                path: resolved.clone(),
                 kind: ArtifactKind::Draft,
                 tokens_estimate: ArtifactRef::estimate_tokens(&content),
                 summary: format!("已写入笔记 {char_count} 字"),
             };
 
             Ok(ToolOutput::artifact(
-                format!("笔记已写入：{path}（{char_count} 字）"),
+                format!("笔记已写入：{}（{char_count} 字）", resolved.display()),
                 artifact,
             ))
         })
@@ -109,7 +109,7 @@ impl ToolHandler for ReadArtifactHandler {
         }
     }
 
-    fn handle<'a>(&'a self, _ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
+    fn handle<'a>(&'a self, ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
         Box::pin(async move {
             // 1. 解析参数：path 必填，max_chars 可选（默认 20000）
             let path = require_str(&params, "path")?;
@@ -118,8 +118,9 @@ impl ToolHandler for ReadArtifactHandler {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(20_000) as usize;
 
-            // 2. 读全文
-            let content = std::fs::read_to_string(&path).map_err(AppError::Io)?;
+            // 2. 沙箱：限制在可信读取根内（artifact 应来自 temp/artifacts/note_dir）
+            let resolved = ctx.resolve_readable(&path)?;
+            let content = std::fs::read_to_string(&resolved).map_err(AppError::Io)?;
             let total = content.chars().count();
 
             // 3. 截断判断：<= max_chars 直接回，超过取前 max_chars 字符 + 标注
