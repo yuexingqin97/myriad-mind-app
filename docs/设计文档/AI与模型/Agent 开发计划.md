@@ -1,7 +1,7 @@
 # Agent 开发计划
 
-> 编写日期：2026-06-22
-> 状态：**计划已确认，待 Phase 0 开工**
+> 编写日期：2026-06-22（更新于 2026-06-23 夜间）
+> 状态：**Phase 0–3 + Spike 流式 全完成，`cargo check` 0 错误；已通过真实 key 运行验证（本地文档炼化通过），视频/URL 链路待测**
 > 架构决策权威：[`Agent架构设计.md`](./Agent架构设计.md)（本文件是其 §十分阶段实施的可执行细化）
 > 模型层：[`AI多模型接入架构设计.md`](./AI多模型接入架构设计.md)
 > 跟踪：本文档任务 + [`docs/项目管理/开发任务清单.md`](../../项目管理/开发任务清单.md)
@@ -340,8 +340,8 @@ packages/core/prompts/agent/charter.md   # agent charter 模板（Phase 0 后的
 |------|------|------|----------|
 | Phase 0 提示词共享化 | ✅ | cargo check ✓ | `.md` 迁至 `packages/core/prompts/`；`prompt_manager` 优先认 core；`tauri.conf.json` resources 指向 core；删 core TS 死代码 + 清 `index.ts` |
 | Phase 1 工具封装 | ✅ | cargo check ✓ | `commands/tools/`（`ToolSpec`+`ToolHandler`+`ToolOutput` artifact 化+`ToolRegistry`）+ 13 个 handler（acquire 9 / analyze 2 / io 2） |
-| Spike tool use 契约 | ⚠️ 未实证 | 仅按官方文档 | 按 DeepSeek 官方 OpenAI 兼容格式实现（非流式）；**未用真实 API 验证** |
-| Phase 2 Agent Loop | ✅ | cargo check ✓ | `agent/{runner,charter,context,mod}` + `deepseek::chat_turn` + `agent/charter.md`；六阶段骨架 + TaskState + 护栏(MAX_STEPS) + 分块流式发出 |
+| Spike tool use 契约 | ✅ 已验证 | 2026-06-23 流式实证 | 流式 tool_calls delta 分片累积（`index` 分桶 + arguments 拼接）+ `stream_chat_turn` 实现（DeepSeek SSE 流式，~230 行）；`chat_turn` 退役 |
+| Phase 2 Agent Loop | ✅ | cargo check ✓ | `agent/{runner,charter,context,mod}` + `deepseek::stream_chat_turn` + `agent/charter.md`；六阶段骨架 + TaskState + 护栏(MAX_STEPS) + 流式 mind-stream 推送 |
 | Phase 3 接线删旧 | ✅ | cargo check ✓（0 error） | `execute_pipeline` 改调度 agent；`persist_note` 落盘；删 `run_{video,audio,text}_pipeline` + 专属 helper + `engine::generate_note`；前端兼容性已核查 |
 
 ### 对抗审查与修复（2026-06-22）
@@ -384,10 +384,49 @@ packages/core/prompts/agent/charter.md   # agent charter 模板（Phase 0 后的
 
 ---
 
+### 运行期调试增强（2026-06-23）
+
+> **问题**：agent 调试时 dev 日志只输出 LLM 元数据，完全不输出模型实际回复内容、工具调用参数、工具返回结果。排查问题极其困难。
+
+**修复历程**（同日迭代 3 轮）：
+
+| 轮次 | 改动 | 文件 |
+|------|------|------|
+| 1 | 双层日志：dev 日志 300–500 字预览 + 用户面板 80–100 字简述 | `deepseek.rs` + `runner.rs` (+122 行) |
+| 2 | 用户面板改为完整输出（去掉 80/100 字截断）+ `reasoning_content` 回退修复 | `runner.rs` |
+| 3 | **流式 tool_calls**：`stream_chat_turn` 替代 `chat_turn`，agent 推理实时经 mind-stream 推送前端 | `deepseek.rs` (+230 行) + `runner.rs` |
+
+**最终日志体系**：
+
+| 层 | 目标 | 详细度 | 通道 |
+|---|------|--------|------|
+| Dev 日志 | F12 Console + 日志文件 | 300–500 字符预览 | `log::debug!(target: "agent")` |
+| 用户面板 | 炼化日志 UI | **完整输出**（不截断） | `emit_progress(detail=...)` → `log("info")` |
+| 笔记预览区 | 前端笔记区 | **实时流式** | `mind-stream` Delta 事件 |
+
+**最终改动清单**（2 文件，+355 行）：
+
+| 位置 | 新增内容 | 通道 |
+|------|---------|------|
+| `deepseek.rs::stream_chat_turn_done` | 流式完成日志（finish / tool_calls / content_preview / reasoning_chars / reasoning_preview） | Dev |
+| `deepseek.rs::chat_turn_done` | 响应内容预览 `content_preview`（500 字）+ `reasoning_chars` + `reasoning_preview`（content 空时展示） | Dev |
+| `deepseek.rs::stream_deepseek` | 流式输出预览 `output_preview`（500 字） | Dev |
+| `deepseek.rs` 工具调用后 | 工具调用明细（函数名 + 参数 200 字） | Dev |
+| `runner.rs` 推理轮 | agent 每轮分析文本（500 字 dev + **完整文本**用户面板 `💭 agent 分析`） | 双层 |
+| `runner.rs` 工具调用 | 完整参数 JSON 进 `emit_progress` detail | 用户面板 |
+| `runner.rs` 工具结果 | 返回结果预览（300 字 dev）+ **完整结果**用户面板（`← xxx 完成/失败`） | 双层 |
+| `runner.rs` agent 终止 | 笔记预览 + reasoning_chars + fell_back 标记（dev）+ `📝 正在总结笔记…`（用户面板） | 双层 |
+
+**附加修复**：DeepSeek thinking mode 下 `content` 为空但 `reasoning_content` 有正文 → terminate 自动回退 + `log::warn!` 标记。
+
+**前端无改动**：`emit_progress(detail)` → `pushLog("info")` 链路已存在，`mind-stream` Delta/Done 事件保持不变。
+
+---
+
 ### 实现偏离与简化（均标注于代码注释）
 
 1. **媒体函数 `pub(crate)` 原地共享** —— 未物理搬到 `commands/tools/media/`（降低无运行时验证下的 churn 风险），功能等价；物理搬移留作后续。
-2. **DeepSeek tool use 非流式** —— Spike 未实证，按官方 OpenAI 兼容规范实现；流式 + tool_call 分片累积未做。
+2. **流式 tool_calls 已实现**（2026-06-23）—— `stream_chat_turn` 替代了非流式 `chat_turn`，SSE 分片累积 tool_calls delta（`index` 分桶 + `arguments` 拼接），agent 推理实时可见。~~Spike 未实证~~ 已实证，`chat_turn` 保留为死代码待后续清理。
 3. **无阶段边界 context 清零**（设计 §6.6.4，标 P1 延后）—— v1 靠 artifact 化 + 1M 窗口承载；`Cycle Restart` 同延后。
 4. **花费开关未接 config** —— `allow_paid=true` 默认；`query_ai_douyin` 标 Paid 但默认可见。
 5. **`persist_note` 不更新 `.myriad-mind/` 索引与指纹** —— 已知回归（原 run_* 有），后续补 library 接入。

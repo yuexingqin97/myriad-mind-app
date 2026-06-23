@@ -4,11 +4,12 @@
 
 use super::types::{
     AgentTurnResult, AiErrorKind, MindRequest, MindResponse, MindStreamEvent, ReasoningEffort,
-    ThinkingConfig, TokenUsage, ToolCall,
+    ThinkingConfig, TokenUsage, ToolCall, ToolCallFunction,
 };
 use crate::error::AppError;
 use reqwest::Client;
 use serde_json::Value;
+use std::collections::HashMap;
 use tauri::{AppHandle, Emitter};
 use tokio_stream::StreamExt;
 
@@ -279,12 +280,14 @@ pub async fn stream_deepseek(
     let output_chars = full_text.len();
     let reasoning_chars = reasoning_text.len();
     let reasoning_shunted = !reasoning_text.is_empty();
+    let output_preview: String = full_text.chars().take(500).collect();
     log::debug!(
         target: "agent",
         "[llm] phase=response model={model} finish_reason={finish} duration_ms={duration_ms} \
          input_tokens={in_tok} output_tokens={out_tok} reasoning_tokens={:?} total_tokens={total_tok} \
-         output_chars={output_chars} reasoning_chars={reasoning_chars} reasoning_shunted={reasoning_shunted}",
-        reason_tok,
+         output_chars={output_chars} output_preview={:?} \
+         reasoning_chars={reasoning_chars} reasoning_shunted={reasoning_shunted}",
+        reason_tok, output_preview,
     );
 
     Ok(MindResponse {
@@ -410,6 +413,23 @@ pub async fn chat_turn(
         })
         .unwrap_or_default();
 
+    // 工具调用明细（dev 日志：函数名 + 参数前 200 字符）
+    if !tool_calls.is_empty() {
+        let tc_summary: Vec<String> = tool_calls
+            .iter()
+            .map(|tc| {
+                let args_preview: String =
+                    tc.function.arguments.chars().take(200).collect();
+                format!("{}[{}]", tc.function.name, args_preview)
+            })
+            .collect();
+        log::debug!(
+            target: "agent",
+            "[llm] phase=tool_calls calls={}",
+            tc_summary.join(" | ")
+        );
+    }
+
     let usage = json.get("usage").map(|u| TokenUsage {
         input_tokens: u["input_tokens"]
             .as_u64()
@@ -426,11 +446,342 @@ pub async fn chat_turn(
         total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
     });
 
+    let content_chars = content.as_deref().unwrap_or("").chars().count();
+    let content_preview: String = content
+        .as_deref()
+        .unwrap_or("")
+        .chars()
+        .take(500)
+        .collect();
+    let reasoning_chars = reasoning_content
+        .as_deref()
+        .map(|r| r.chars().count())
+        .unwrap_or(0);
+    // content 为空时展示 reasoning 预览（thinking mode 下正文可能落在 reasoning 字段）
+    let reasoning_preview: Option<String> = if content_chars == 0 {
+        reasoning_content
+            .as_deref()
+            .map(|r| r.chars().take(300).collect())
+    } else {
+        None
+    };
     log::debug!(
         target: "agent",
-        "[llm] phase=chat_turn_done finish={:?} tool_calls={} duration_ms={} total_tokens={}",
+        "[llm] phase=chat_turn_done finish={:?} tool_calls={} content_chars={content_chars} \
+         reasoning_chars={reasoning_chars} reasoning_preview={:?} \
+         content_preview={:?} duration_ms={} total_tokens={}",
         finish_reason,
         tool_calls.len(),
+        reasoning_preview,
+        content_preview,
+        req_start.elapsed().as_millis(),
+        usage.as_ref().map(|u| u.total_tokens).unwrap_or(0)
+    );
+
+    Ok(AgentTurnResult {
+        message,
+        content,
+        tool_calls,
+        reasoning_content,
+        usage,
+        finish_reason,
+    })
+}
+
+/// 流式 chat（带 tools）—— agent loop 用（设计文档 §Spike 流式 tool_calls）。
+///
+/// 与 `chat_turn` 的差异：`stream=true`，实时解析 SSE delta（content / reasoning_content /
+/// tool_calls 分片累积），流式推送 `mind-stream` Delta 事件。返回值相同（`AgentTurnResult`），
+/// runner.rs 只需替换函数名即可获得流式实时可见性。
+///
+/// Tool calls 增量累积：DeepSeek 流式输出 `delta.tool_calls[].function.arguments` 为
+/// 逐 token JSON 碎片，需按 `index` 分桶拼接后才能整体 parse。
+/// 同一 SSE chunk 可混合 content + tool_calls + reasoning_content。
+pub async fn stream_chat_turn(
+    app_handle: &AppHandle,
+    system_prompt: &str,
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
+    thinking: Option<&ThinkingConfig>,
+    api_key: &str,
+) -> Result<AgentTurnResult, AppError> {
+    let client = Client::new();
+    let model = "deepseek-v4-pro";
+
+    let mut all_messages = vec![serde_json::json!({ "role": "system", "content": system_prompt })];
+    all_messages.extend_from_slice(messages);
+
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": all_messages,
+        "stream": true,
+        "max_tokens": 131072,
+    });
+    if !tools.is_empty() {
+        body["tools"] = serde_json::json!(tools);
+    }
+    if let Some(thinking) = thinking {
+        if thinking.enabled {
+            body["thinking"] = serde_json::json!({ "type": "enabled" });
+            if let Some(effort) = &thinking.effort {
+                body["reasoning_effort"] = match effort {
+                    ReasoningEffort::High => serde_json::json!("high"),
+                    ReasoningEffort::Max => serde_json::json!("max"),
+                };
+            }
+        }
+    }
+
+    let prompt_chars: usize = all_messages
+        .iter()
+        .map(|m| {
+            m.get("content")
+                .and_then(|v| v.as_str())
+                .map(|s| s.chars().count())
+                .unwrap_or(0)
+        })
+        .sum();
+    log::debug!(
+        target: "agent",
+        "[llm] phase=stream_chat_turn model={model} tools={} messages={} prompt_chars={prompt_chars}",
+        tools.len(),
+        all_messages.len()
+    );
+
+    let req_start = std::time::Instant::now();
+    let response = client
+        .post(format!("{BASE_URL}{CHAT_ENDPOINT}"))
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| AppError::Ai {
+            kind: if e.is_timeout() { "timeout" } else { "network" }.into(),
+            message: e.to_string(),
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body_text = response.text().await.unwrap_or_default();
+        let kind = AiErrorKind::classify(Some(status.as_u16()), &body_text);
+        log::warn!(
+            target: "agent",
+            "[llm] phase=stream_chat_turn_error status={} kind={} duration_ms={}",
+            status.as_u16(),
+            kind,
+            req_start.elapsed().as_millis()
+        );
+        return Err(AppError::Ai {
+            kind: kind.to_string(),
+            message: body_text,
+        });
+    }
+
+    let mut stream = response.bytes_stream();
+    let mut full_text = String::new();
+    let mut reasoning_text = String::new();
+    let mut usage: Option<TokenUsage> = None;
+    let mut finish_reason: Option<String> = None;
+
+    // 工具调用增量缓冲：index → (id, function_name, accumulated_arguments)
+    let mut tc_buffer: HashMap<i64, (String, String, String)> = HashMap::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| AppError::Ai {
+            kind: "network".to_string(),
+            message: format!("流读取失败: {e}"),
+        })?;
+
+        for line in chunk.split(|&b| b == b'\n') {
+            let line = String::from_utf8_lossy(line);
+            let trimmed = line.trim();
+
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            if let Some(data) = trimmed.strip_prefix("data: ") {
+                if data.trim() == "[DONE]" {
+                    continue;
+                }
+
+                if let Ok(parsed) = serde_json::from_str::<Value>(data) {
+                    let delta = &parsed["choices"][0]["delta"];
+
+                    // 正文增量
+                    if let Some(content) = delta["content"].as_str() {
+                        full_text.push_str(content);
+                        let _ = app_handle.emit(
+                            "mind-stream",
+                            MindStreamEvent::Delta {
+                                delta: content.to_string(),
+                            },
+                        );
+                    }
+
+                    // 推理增量
+                    if let Some(reasoning) = delta["reasoning_content"].as_str() {
+                        reasoning_text.push_str(reasoning);
+                        let _ = app_handle.emit(
+                            "mind-stream",
+                            MindStreamEvent::ReasoningDelta {
+                                delta: reasoning.to_string(),
+                            },
+                        );
+                    }
+
+                    // 工具调用增量（delta.tool_calls，非 message.tool_calls）
+                    if let Some(tc_array) = delta["tool_calls"].as_array() {
+                        for tc_delta in tc_array {
+                            let idx = tc_delta["index"].as_i64().unwrap_or(0);
+                            if let Some(entry) = tc_buffer.get_mut(&idx) {
+                                // 已有条目：追加 arguments 片段
+                                if let Some(args_frag) =
+                                    tc_delta["function"]["arguments"].as_str()
+                                {
+                                    entry.2.push_str(args_frag);
+                                }
+                            } else {
+                                // 首次出现：新建条目（id + name 只在首 chunk 出现）
+                                let id = tc_delta["id"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string();
+                                let name = tc_delta["function"]["name"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string();
+                                let args = tc_delta["function"]["arguments"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string();
+                                tc_buffer.insert(idx, (id, name, args));
+                            }
+                        }
+                    }
+
+                    // finish_reason
+                    if let Some(fr) = parsed["choices"][0]["finish_reason"].as_str() {
+                        finish_reason = Some(fr.to_string());
+                    }
+
+                    // usage
+                    if let Some(u) = parsed.get("usage") {
+                        usage = Some(TokenUsage {
+                            input_tokens: u["input_tokens"]
+                                .as_u64()
+                                .or_else(|| u["prompt_tokens"].as_u64())
+                                .unwrap_or(0) as u32,
+                            output_tokens: u["output_tokens"]
+                                .as_u64()
+                                .or_else(|| u["completion_tokens"].as_u64())
+                                .unwrap_or(0) as u32,
+                            reasoning_tokens: u["completion_tokens_details"]
+                                .get("reasoning_tokens")
+                                .and_then(|v| v.as_u64())
+                                .map(|v| v as u32),
+                            total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+                        });
+
+                        let _ = app_handle.emit(
+                            "mind-stream",
+                            MindStreamEvent::Usage {
+                                input_tokens: usage.as_ref().map(|u| u.input_tokens),
+                                output_tokens: usage.as_ref().map(|u| u.output_tokens),
+                                reasoning_tokens: usage
+                                    .as_ref()
+                                    .and_then(|u| u.reasoning_tokens),
+                                total_tokens: usage.as_ref().map(|u| u.total_tokens),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // 流结束：解析累积的 tool_calls
+    let tool_calls: Vec<ToolCall> = {
+        let mut indices: Vec<i64> = tc_buffer.keys().copied().collect();
+        indices.sort(); // 保持 index 顺序
+        indices
+            .into_iter()
+            .filter_map(|idx| {
+                let (id, name, arguments) = tc_buffer.remove(&idx)?;
+                if name.is_empty() {
+                    return None; // 只有 arguments 无 name → 异常碎片，丢弃
+                }
+                Some(ToolCall {
+                    id,
+                    kind: Some("function".into()),
+                    function: ToolCallFunction { name, arguments },
+                })
+            })
+            .collect()
+    };
+
+    // 构建 assistant message（OpenAI 格式）
+    let mut message = serde_json::json!({
+        "role": "assistant",
+        "content": if full_text.is_empty() { serde_json::json!(null) } else { serde_json::json!(full_text) },
+    });
+    if !tool_calls.is_empty() {
+        let tc_json: Vec<Value> = tool_calls
+            .iter()
+            .map(|tc| {
+                serde_json::json!({
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    }
+                })
+            })
+            .collect();
+        message["tool_calls"] = serde_json::json!(tc_json);
+    }
+
+    let content: Option<String> = if full_text.is_empty() {
+        None
+    } else {
+        Some(full_text.clone())
+    };
+    let reasoning_content: Option<String> = if reasoning_text.is_empty() {
+        None
+    } else {
+        Some(reasoning_text)
+    };
+
+    // 日志（同 chat_turn_done 格式）
+    let content_chars = content.as_deref().unwrap_or("").chars().count();
+    let content_preview: String = content
+        .as_deref()
+        .unwrap_or("")
+        .chars()
+        .take(500)
+        .collect();
+    let reasoning_chars = reasoning_content
+        .as_deref()
+        .map(|r| r.chars().count())
+        .unwrap_or(0);
+    let reasoning_preview: Option<String> = if content_chars == 0 {
+        reasoning_content
+            .as_deref()
+            .map(|r| r.chars().take(300).collect())
+    } else {
+        None
+    };
+    log::debug!(
+        target: "agent",
+        "[llm] phase=stream_chat_turn_done finish={:?} tool_calls={} content_chars={content_chars} \
+         reasoning_chars={reasoning_chars} reasoning_preview={:?} \
+         content_preview={:?} duration_ms={} total_tokens={}",
+        finish_reason,
+        tool_calls.len(),
+        reasoning_preview,
+        content_preview,
         req_start.elapsed().as_millis(),
         usage.as_ref().map(|u| u.total_tokens).unwrap_or(0)
     );

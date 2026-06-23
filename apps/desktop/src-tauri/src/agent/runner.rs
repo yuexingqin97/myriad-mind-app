@@ -2,16 +2,16 @@
 // runner — agent 主循环（设计文档 §6.1 loop / §6.3 护栏 / §6.4 错误 / §6.5 取消）
 //
 // 流程：构造 ToolContext + Registry → 回忆(加载 memory) → charter system prompt →
-//   loop { chat_turn(tools) → 有 tool_calls 则 dispatch + 回喂；无则终结产出笔记 }
+//   loop { stream_chat_turn(tools) → 有 tool_calls 则 dispatch + 回喂；无则终结产出笔记 }
 // 护栏：MAX_STEPS 强制结束。取消：AtomicBool 每轮检查（Phase 3 由 Tauri 命令置位）。
 //
-// 非流式：tool-use 轮用 chat_turn（非流式，OpenAI 兼容），最终笔记经 mind-stream 发出。
-// （流式 + tool_call 分片累积未在本项目验证，v1 用非流式更可靠；见计划文档 Spike 说明。）
+// 流式：tool-use 轮用 stream_chat_turn（DeepSeek SSE 流式，累积分片 tool_calls delta），
+// agent 推理过程实时经 mind-stream 推送前端，最终笔记 Done 事件标记完结。
 // ============================================================
 
 use super::charter;
 use super::context::TaskState;
-use crate::commands::ai::deepseek::chat_turn;
+use crate::commands::ai::deepseek::stream_chat_turn;
 use crate::commands::ai::engine::read_deepseek_key;
 use crate::commands::ai::types::{MindStreamEvent, ReasoningEffort, ThinkingConfig};
 use crate::commands::pipeline::{emit_progress, generate_temp_id};
@@ -156,8 +156,29 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
         )?;
 
         let mut turn =
-            chat_turn(app, &system_prompt, &messages, &tools_for_llm, Some(&thinking), &api_key)
+            stream_chat_turn(app, &system_prompt, &messages, &tools_for_llm, Some(&thinking), &api_key)
                 .await?;
+
+        // agent 本轮推理文本 — dev 日志全量预览 + 用户面板完整输出
+        if let Some(ref text) = turn.content {
+            if !text.trim().is_empty() {
+                let dev_preview: String = text.chars().take(500).collect();
+                log::debug!(
+                    target: "agent",
+                    "[agent] reasoning step={steps} chars={} preview={:?}",
+                    text.chars().count(),
+                    dev_preview
+                );
+                emit_progress(
+                    app,
+                    "agent",
+                    "💭 agent 分析",
+                    10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
+                    "running",
+                    Some(text.as_str()),
+                );
+            }
+        }
 
         if let Some(u) = &turn.usage {
             total_tokens += u.total_tokens as u64;
@@ -174,14 +195,44 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
         }
 
         if turn.tool_calls.is_empty() {
-            // 终止轮：最终笔记内容
-            final_content = turn.content.clone().unwrap_or_default();
+            // 终止轮：最终笔记内容。
+            // Thinking mode 下 DeepSeek V4 有时把正文放在 reasoning_content 而 content 为空/null；
+            // 优先 content，空则回退 reasoning_content。
+            let mut raw_content = turn.content.clone().unwrap_or_default();
+            let fell_back_to_reasoning = raw_content.trim().is_empty()
+                && turn.reasoning_content.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            if fell_back_to_reasoning {
+                log::warn!(
+                    target: "agent",
+                    "[agent] content 为空，回退 reasoning_content（{} 字符）",
+                    turn.reasoning_content.as_deref().unwrap_or("").chars().count()
+                );
+                raw_content = turn.reasoning_content.clone().unwrap_or_default();
+            }
+            final_content = raw_content;
             messages.push(turn.message);
+            let preview: String = final_content.chars().take(500).collect();
+            let reasoning_chars = turn
+                .reasoning_content
+                .as_deref()
+                .map(|r| r.chars().count())
+                .unwrap_or(0);
             log::debug!(
                 target: "agent",
-                "[agent] terminate step={steps} content_chars={} tools_used={:?}",
+                "[agent] terminate step={steps} content_chars={} reasoning_chars={reasoning_chars} \
+                 fell_back={fell_back_to_reasoning} preview={:?} tools_used={:?}",
                 final_content.chars().count(),
+                preview,
                 tools_used
+            );
+            // 用户面板：只提示总结中，不重复展示笔记正文（正文已走 mind-stream 流式显示在笔记预览区）
+            emit_progress(
+                app,
+                "agent",
+                "📝 正在总结笔记…",
+                10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
+                "running",
+                None,
             );
             break;
         }
@@ -198,7 +249,7 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
                 &format!("🔧 调用工具：{}", tc.function.name),
                 10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
                 "running",
-                None,
+                Some(&tc.function.arguments),
             );
 
             // 解析参数（模型给的 arguments 是 JSON 字符串）。失败则回喂诊断 + 跳过本次 dispatch，
@@ -234,7 +285,14 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
                     for art in &out.artifact_refs {
                         task_state.add_artifact(art.clone());
                     }
-                    if !out.artifact_refs.is_empty() {
+                    // 提前捕获 artifact 摘要（to_llm_text() 会消费 out）
+                    let artifact_summary: Vec<String> = out
+                        .artifact_refs
+                        .iter()
+                        .map(|a| format!("{}:{:?}", a.id, a.kind))
+                        .collect();
+                    let has_artifacts = !artifact_summary.is_empty();
+                    if has_artifacts {
                         let names: Vec<&str> =
                             out.artifact_refs.iter().map(|a| a.id.as_str()).collect();
                         task_state.decisions.push(format!(
@@ -242,7 +300,38 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
                             names.join(", ")
                         ));
                     }
-                    out.to_llm_text()
+
+                    let text = out.to_llm_text();
+
+                    // Dev 日志：工具返回结果预览
+                    if has_artifacts {
+                        log::debug!(
+                            target: "agent",
+                            "[agent] tool {} done artifacts=[{}]",
+                            tc.function.name,
+                            artifact_summary.join(", ")
+                        );
+                    } else {
+                        let preview: String = text.chars().take(300).collect();
+                        log::debug!(
+                            target: "agent",
+                            "[agent] tool {} done preview={:?}",
+                            tc.function.name,
+                            preview
+                        );
+                    }
+
+                    // 用户面板：完整输出
+                    emit_progress(
+                        app,
+                        "agent",
+                        &format!("  ← {} 完成", tc.function.name),
+                        10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
+                        "running",
+                        Some(&text),
+                    );
+
+                    text
                 }
                 Err(e) => {
                     log::warn!(
@@ -252,7 +341,19 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
                     );
                     // 回喂错误。stderr 已在 python.rs 源头脱敏（redact_secrets），不含明文 api_key；
                     // 其他 AppError 变体（Config/Other）只含路径/消息，无密钥。
-                    format!("⚠️ 工具 {} 执行失败：{}", tc.function.name, e)
+                    let msg = format!("⚠️ 工具 {} 执行失败：{}", tc.function.name, e);
+
+                    // 用户面板：完整输出
+                    emit_progress(
+                        app,
+                        "agent",
+                        &format!("  ← {} 失败", tc.function.name),
+                        10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
+                        "running",
+                        Some(&msg),
+                    );
+
+                    msg
                 }
             };
 
@@ -305,19 +406,8 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
         }
     }
 
-    // 通过 mind-stream 分块发出最终笔记（匹配前端增量累积逻辑，每 ~1500 字一帧；
-    // 按字符边界切片，避免拆分中文字符）
-    {
-        let chars: Vec<char> = final_content.chars().collect();
-        const CHUNK: usize = 1500;
-        let mut i = 0;
-        while i < chars.len() {
-            let end = (i + CHUNK).min(chars.len());
-            let frame: String = chars[i..end].iter().collect();
-            let _ = app.emit("mind-stream", MindStreamEvent::Delta { delta: frame });
-            i = end;
-        }
-    }
+    // 最终笔记已由 stream_chat_turn 流式发出 Delta 事件，此处仅发 Done 标记完成
+    // （前端以 Done::text 为权威正文，覆盖流式累积的中间文本）。
     let _ = app.emit(
         "mind-stream",
         MindStreamEvent::Done {
