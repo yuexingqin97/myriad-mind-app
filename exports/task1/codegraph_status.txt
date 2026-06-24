@@ -1,0 +1,20 @@
+[1m
+CodeGraph Status
+[0m
+[36mProject:[0m D:\AgentColosseum\myriad-mind-app-dsv4-cc
+
+[1mIndex Statistics:[0m
+  Files:     86
+  Nodes:     1,134
+  Edges:     2,523
+  DB Size:   3.43 MB
+  Backend:   [32mnode:sqlite - built-in (full WAL)[0m
+  Journal:   [32mwal[0m
+
+[1mNodes by Kind:[0m
+  function        398
+  import          270
+  file            84
+  enum_member     67
+  constant        66
+  interface       66

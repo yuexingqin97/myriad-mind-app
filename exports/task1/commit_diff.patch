@@ -1,0 +1,693 @@
+diff --git a/apps/desktop/src-tauri/src/agent/runner.rs b/apps/desktop/src-tauri/src/agent/runner.rs
+index 5109015..2ca8399 100644
+--- a/apps/desktop/src-tauri/src/agent/runner.rs
++++ b/apps/desktop/src-tauri/src/agent/runner.rs
+@@ -2,16 +2,16 @@
+ // runner — agent 主循环（设计文档 §6.1 loop / §6.3 护栏 / §6.4 错误 / §6.5 取消）
+ //
+ // 流程：构造 ToolContext + Registry → 回忆(加载 memory) → charter system prompt →
+-//   loop { chat_turn(tools) → 有 tool_calls 则 dispatch + 回喂；无则终结产出笔记 }
++//   loop { stream_chat_turn(tools) → 有 tool_calls 则 dispatch + 回喂；无则终结产出笔记 }
+ // 护栏：MAX_STEPS 强制结束。取消：AtomicBool 每轮检查（Phase 3 由 Tauri 命令置位）。
+ //
+-// 非流式：tool-use 轮用 chat_turn（非流式，OpenAI 兼容），最终笔记经 mind-stream 发出。
+-// （流式 + tool_call 分片累积未在本项目验证，v1 用非流式更可靠；见计划文档 Spike 说明。）
++// 流式：tool-use 轮用 stream_chat_turn（DeepSeek SSE 流式，累积分片 tool_calls delta），
++// agent 推理过程实时经 mind-stream 推送前端，最终笔记 Done 事件标记完结。
+ // ============================================================
+ 
+ use super::charter;
+ use super::context::TaskState;
+-use crate::commands::ai::deepseek::chat_turn;
++use crate::commands::ai::deepseek::stream_chat_turn;
+ use crate::commands::ai::engine::read_deepseek_key;
+ use crate::commands::ai::types::{MindStreamEvent, ReasoningEffort, ThinkingConfig};
+ use crate::commands::pipeline::{emit_progress, generate_temp_id};
+@@ -156,9 +156,30 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
+         )?;
+ 
+         let mut turn =
+-            chat_turn(app, &system_prompt, &messages, &tools_for_llm, Some(&thinking), &api_key)
++            stream_chat_turn(app, &system_prompt, &messages, &tools_for_llm, Some(&thinking), &api_key)
+                 .await?;
+ 
++        // agent 本轮推理文本 — dev 日志全量预览 + 用户面板完整输出
++        if let Some(ref text) = turn.content {
++            if !text.trim().is_empty() {
++                let dev_preview: String = text.chars().take(500).collect();
++                log::debug!(
++                    target: "agent",
++                    "[agent] reasoning step={steps} chars={} preview={:?}",
++                    text.chars().count(),
++                    dev_preview
++                );
++                emit_progress(
++                    app,
++                    "agent",
++                    "💭 agent 分析",
++                    10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
++                    "running",
++                    Some(text.as_str()),
++                );
++            }
++        }
++
+         if let Some(u) = &turn.usage {
+             total_tokens += u.total_tokens as u64;
+         }
+@@ -174,15 +195,45 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
+         }
+ 
+         if turn.tool_calls.is_empty() {
+-            // 终止轮：最终笔记内容
+-            final_content = turn.content.clone().unwrap_or_default();
++            // 终止轮：最终笔记内容。
++            // Thinking mode 下 DeepSeek V4 有时把正文放在 reasoning_content 而 content 为空/null；
++            // 优先 content，空则回退 reasoning_content。
++            let mut raw_content = turn.content.clone().unwrap_or_default();
++            let fell_back_to_reasoning = raw_content.trim().is_empty()
++                && turn.reasoning_content.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false);
++            if fell_back_to_reasoning {
++                log::warn!(
++                    target: "agent",
++                    "[agent] content 为空，回退 reasoning_content（{} 字符）",
++                    turn.reasoning_content.as_deref().unwrap_or("").chars().count()
++                );
++                raw_content = turn.reasoning_content.clone().unwrap_or_default();
++            }
++            final_content = raw_content;
+             messages.push(turn.message);
++            let preview: String = final_content.chars().take(500).collect();
++            let reasoning_chars = turn
++                .reasoning_content
++                .as_deref()
++                .map(|r| r.chars().count())
++                .unwrap_or(0);
+             log::debug!(
+                 target: "agent",
+-                "[agent] terminate step={steps} content_chars={} tools_used={:?}",
++                "[agent] terminate step={steps} content_chars={} reasoning_chars={reasoning_chars} \
++                 fell_back={fell_back_to_reasoning} preview={:?} tools_used={:?}",
+                 final_content.chars().count(),
++                preview,
+                 tools_used
+             );
++            // 用户面板：只提示总结中，不重复展示笔记正文（正文已走 mind-stream 流式显示在笔记预览区）
++            emit_progress(
++                app,
++                "agent",
++                "📝 正在总结笔记…",
++                10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
++                "running",
++                None,
++            );
+             break;
+         }
+ 
+@@ -198,7 +249,7 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
+                 &format!("🔧 调用工具：{}", tc.function.name),
+                 10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
+                 "running",
+-                None,
++                Some(&tc.function.arguments),
+             );
+ 
+             // 解析参数（模型给的 arguments 是 JSON 字符串）。失败则回喂诊断 + 跳过本次 dispatch，
+@@ -234,7 +285,14 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
+                     for art in &out.artifact_refs {
+                         task_state.add_artifact(art.clone());
+                     }
+-                    if !out.artifact_refs.is_empty() {
++                    // 提前捕获 artifact 摘要（to_llm_text() 会消费 out）
++                    let artifact_summary: Vec<String> = out
++                        .artifact_refs
++                        .iter()
++                        .map(|a| format!("{}:{:?}", a.id, a.kind))
++                        .collect();
++                    let has_artifacts = !artifact_summary.is_empty();
++                    if has_artifacts {
+                         let names: Vec<&str> =
+                             out.artifact_refs.iter().map(|a| a.id.as_str()).collect();
+                         task_state.decisions.push(format!(
+@@ -242,7 +300,38 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
+                             names.join(", ")
+                         ));
+                     }
+-                    out.to_llm_text()
++
++                    let text = out.to_llm_text();
++
++                    // Dev 日志：工具返回结果预览
++                    if has_artifacts {
++                        log::debug!(
++                            target: "agent",
++                            "[agent] tool {} done artifacts=[{}]",
++                            tc.function.name,
++                            artifact_summary.join(", ")
++                        );
++                    } else {
++                        let preview: String = text.chars().take(300).collect();
++                        log::debug!(
++                            target: "agent",
++                            "[agent] tool {} done preview={:?}",
++                            tc.function.name,
++                            preview
++                        );
++                    }
++
++                    // 用户面板：完整输出
++                    emit_progress(
++                        app,
++                        "agent",
++                        &format!("  ← {} 完成", tc.function.name),
++                        10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
++                        "running",
++                        Some(&text),
++                    );
++
++                    text
+                 }
+                 Err(e) => {
+                     log::warn!(
+@@ -252,7 +341,19 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
+                     );
+                     // 回喂错误。stderr 已在 python.rs 源头脱敏（redact_secrets），不含明文 api_key；
+                     // 其他 AppError 变体（Config/Other）只含路径/消息，无密钥。
+-                    format!("⚠️ 工具 {} 执行失败：{}", tc.function.name, e)
++                    let msg = format!("⚠️ 工具 {} 执行失败：{}", tc.function.name, e);
++
++                    // 用户面板：完整输出
++                    emit_progress(
++                        app,
++                        "agent",
++                        &format!("  ← {} 失败", tc.function.name),
++                        10.0 + (steps as f64 / MAX_STEPS as f64) * 70.0,
++                        "running",
++                        Some(&msg),
++                    );
++
++                    msg
+                 }
+             };
+ 
+@@ -305,19 +406,8 @@ pub async fn run(app: &AppHandle, req: AgentRequest) -> Result<AgentResult, AppE
+         }
+     }
+ 
+-    // 通过 mind-stream 分块发出最终笔记（匹配前端增量累积逻辑，每 ~1500 字一帧；
+-    // 按字符边界切片，避免拆分中文字符）
+-    {
+-        let chars: Vec<char> = final_content.chars().collect();
+-        const CHUNK: usize = 1500;
+-        let mut i = 0;
+-        while i < chars.len() {
+-            let end = (i + CHUNK).min(chars.len());
+-            let frame: String = chars[i..end].iter().collect();
+-            let _ = app.emit("mind-stream", MindStreamEvent::Delta { delta: frame });
+-            i = end;
+-        }
+-    }
++    // 最终笔记已由 stream_chat_turn 流式发出 Delta 事件，此处仅发 Done 标记完成
++    // （前端以 Done::text 为权威正文，覆盖流式累积的中间文本）。
+     let _ = app.emit(
+         "mind-stream",
+         MindStreamEvent::Done {
+diff --git a/apps/desktop/src-tauri/src/commands/ai/deepseek.rs b/apps/desktop/src-tauri/src/commands/ai/deepseek.rs
+index 4bbbff6..e234fb8 100644
+--- a/apps/desktop/src-tauri/src/commands/ai/deepseek.rs
++++ b/apps/desktop/src-tauri/src/commands/ai/deepseek.rs
+@@ -4,11 +4,12 @@
+ 
+ use super::types::{
+     AgentTurnResult, AiErrorKind, MindRequest, MindResponse, MindStreamEvent, ReasoningEffort,
+-    ThinkingConfig, TokenUsage, ToolCall,
++    ThinkingConfig, TokenUsage, ToolCall, ToolCallFunction,
+ };
+ use crate::error::AppError;
+ use reqwest::Client;
+ use serde_json::Value;
++use std::collections::HashMap;
+ use tauri::{AppHandle, Emitter};
+ use tokio_stream::StreamExt;
+ 
+@@ -279,12 +280,14 @@ pub async fn stream_deepseek(
+     let output_chars = full_text.len();
+     let reasoning_chars = reasoning_text.len();
+     let reasoning_shunted = !reasoning_text.is_empty();
++    let output_preview: String = full_text.chars().take(500).collect();
+     log::debug!(
+         target: "agent",
+         "[llm] phase=response model={model} finish_reason={finish} duration_ms={duration_ms} \
+          input_tokens={in_tok} output_tokens={out_tok} reasoning_tokens={:?} total_tokens={total_tok} \
+-         output_chars={output_chars} reasoning_chars={reasoning_chars} reasoning_shunted={reasoning_shunted}",
+-        reason_tok,
++         output_chars={output_chars} output_preview={:?} \
++         reasoning_chars={reasoning_chars} reasoning_shunted={reasoning_shunted}",
++        reason_tok, output_preview,
+     );
+ 
+     Ok(MindResponse {
+@@ -410,6 +413,23 @@ pub async fn chat_turn(
+         })
+         .unwrap_or_default();
+ 
++    // 工具调用明细（dev 日志：函数名 + 参数前 200 字符）
++    if !tool_calls.is_empty() {
++        let tc_summary: Vec<String> = tool_calls
++            .iter()
++            .map(|tc| {
++                let args_preview: String =
++                    tc.function.arguments.chars().take(200).collect();
++                format!("{}[{}]", tc.function.name, args_preview)
++            })
++            .collect();
++        log::debug!(
++            target: "agent",
++            "[llm] phase=tool_calls calls={}",
++            tc_summary.join(" | ")
++        );
++    }
++
+     let usage = json.get("usage").map(|u| TokenUsage {
+         input_tokens: u["input_tokens"]
+             .as_u64()
+@@ -426,11 +446,342 @@ pub async fn chat_turn(
+         total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+     });
+ 
++    let content_chars = content.as_deref().unwrap_or("").chars().count();
++    let content_preview: String = content
++        .as_deref()
++        .unwrap_or("")
++        .chars()
++        .take(500)
++        .collect();
++    let reasoning_chars = reasoning_content
++        .as_deref()
++        .map(|r| r.chars().count())
++        .unwrap_or(0);
++    // content 为空时展示 reasoning 预览（thinking mode 下正文可能落在 reasoning 字段）
++    let reasoning_preview: Option<String> = if content_chars == 0 {
++        reasoning_content
++            .as_deref()
++            .map(|r| r.chars().take(300).collect())
++    } else {
++        None
++    };
++    log::debug!(
++        target: "agent",
++        "[llm] phase=chat_turn_done finish={:?} tool_calls={} content_chars={content_chars} \
++         reasoning_chars={reasoning_chars} reasoning_preview={:?} \
++         content_preview={:?} duration_ms={} total_tokens={}",
++        finish_reason,
++        tool_calls.len(),
++        reasoning_preview,
++        content_preview,
++        req_start.elapsed().as_millis(),
++        usage.as_ref().map(|u| u.total_tokens).unwrap_or(0)
++    );
++
++    Ok(AgentTurnResult {
++        message,
++        content,
++        tool_calls,
++        reasoning_content,
++        usage,
++        finish_reason,
++    })
++}
++
++/// 流式 chat（带 tools）—— agent loop 用（设计文档 §Spike 流式 tool_calls）。
++///
++/// 与 `chat_turn` 的差异：`stream=true`，实时解析 SSE delta（content / reasoning_content /
++/// tool_calls 分片累积），流式推送 `mind-stream` Delta 事件。返回值相同（`AgentTurnResult`），
++/// runner.rs 只需替换函数名即可获得流式实时可见性。
++///
++/// Tool calls 增量累积：DeepSeek 流式输出 `delta.tool_calls[].function.arguments` 为
++/// 逐 token JSON 碎片，需按 `index` 分桶拼接后才能整体 parse。
++/// 同一 SSE chunk 可混合 content + tool_calls + reasoning_content。
++pub async fn stream_chat_turn(
++    app_handle: &AppHandle,
++    system_prompt: &str,
++    messages: &[serde_json::Value],
++    tools: &[serde_json::Value],
++    thinking: Option<&ThinkingConfig>,
++    api_key: &str,
++) -> Result<AgentTurnResult, AppError> {
++    let client = Client::new();
++    let model = "deepseek-v4-pro";
++
++    let mut all_messages = vec![serde_json::json!({ "role": "system", "content": system_prompt })];
++    all_messages.extend_from_slice(messages);
++
++    let mut body = serde_json::json!({
++        "model": model,
++        "messages": all_messages,
++        "stream": true,
++        "max_tokens": 131072,
++    });
++    if !tools.is_empty() {
++        body["tools"] = serde_json::json!(tools);
++    }
++    if let Some(thinking) = thinking {
++        if thinking.enabled {
++            body["thinking"] = serde_json::json!({ "type": "enabled" });
++            if let Some(effort) = &thinking.effort {
++                body["reasoning_effort"] = match effort {
++                    ReasoningEffort::High => serde_json::json!("high"),
++                    ReasoningEffort::Max => serde_json::json!("max"),
++                };
++            }
++        }
++    }
++
++    let prompt_chars: usize = all_messages
++        .iter()
++        .map(|m| {
++            m.get("content")
++                .and_then(|v| v.as_str())
++                .map(|s| s.chars().count())
++                .unwrap_or(0)
++        })
++        .sum();
++    log::debug!(
++        target: "agent",
++        "[llm] phase=stream_chat_turn model={model} tools={} messages={} prompt_chars={prompt_chars}",
++        tools.len(),
++        all_messages.len()
++    );
++
++    let req_start = std::time::Instant::now();
++    let response = client
++        .post(format!("{BASE_URL}{CHAT_ENDPOINT}"))
++        .header("Content-Type", "application/json")
++        .header("Authorization", format!("Bearer {api_key}"))
++        .json(&body)
++        .send()
++        .await
++        .map_err(|e| AppError::Ai {
++            kind: if e.is_timeout() { "timeout" } else { "network" }.into(),
++            message: e.to_string(),
++        })?;
++
++    let status = response.status();
++    if !status.is_success() {
++        let body_text = response.text().await.unwrap_or_default();
++        let kind = AiErrorKind::classify(Some(status.as_u16()), &body_text);
++        log::warn!(
++            target: "agent",
++            "[llm] phase=stream_chat_turn_error status={} kind={} duration_ms={}",
++            status.as_u16(),
++            kind,
++            req_start.elapsed().as_millis()
++        );
++        return Err(AppError::Ai {
++            kind: kind.to_string(),
++            message: body_text,
++        });
++    }
++
++    let mut stream = response.bytes_stream();
++    let mut full_text = String::new();
++    let mut reasoning_text = String::new();
++    let mut usage: Option<TokenUsage> = None;
++    let mut finish_reason: Option<String> = None;
++
++    // 工具调用增量缓冲：index → (id, function_name, accumulated_arguments)
++    let mut tc_buffer: HashMap<i64, (String, String, String)> = HashMap::new();
++
++    while let Some(chunk) = stream.next().await {
++        let chunk = chunk.map_err(|e| AppError::Ai {
++            kind: "network".to_string(),
++            message: format!("流读取失败: {e}"),
++        })?;
++
++        for line in chunk.split(|&b| b == b'\n') {
++            let line = String::from_utf8_lossy(line);
++            let trimmed = line.trim();
++
++            if trimmed.is_empty() {
++                continue;
++            }
++
++            if let Some(data) = trimmed.strip_prefix("data: ") {
++                if data.trim() == "[DONE]" {
++                    continue;
++                }
++
++                if let Ok(parsed) = serde_json::from_str::<Value>(data) {
++                    let delta = &parsed["choices"][0]["delta"];
++
++                    // 正文增量
++                    if let Some(content) = delta["content"].as_str() {
++                        full_text.push_str(content);
++                        let _ = app_handle.emit(
++                            "mind-stream",
++                            MindStreamEvent::Delta {
++                                delta: content.to_string(),
++                            },
++                        );
++                    }
++
++                    // 推理增量
++                    if let Some(reasoning) = delta["reasoning_content"].as_str() {
++                        reasoning_text.push_str(reasoning);
++                        let _ = app_handle.emit(
++                            "mind-stream",
++                            MindStreamEvent::ReasoningDelta {
++                                delta: reasoning.to_string(),
++                            },
++                        );
++                    }
++
++                    // 工具调用增量（delta.tool_calls，非 message.tool_calls）
++                    if let Some(tc_array) = delta["tool_calls"].as_array() {
++                        for tc_delta in tc_array {
++                            let idx = tc_delta["index"].as_i64().unwrap_or(0);
++                            if let Some(entry) = tc_buffer.get_mut(&idx) {
++                                // 已有条目：追加 arguments 片段
++                                if let Some(args_frag) =
++                                    tc_delta["function"]["arguments"].as_str()
++                                {
++                                    entry.2.push_str(args_frag);
++                                }
++                            } else {
++                                // 首次出现：新建条目（id + name 只在首 chunk 出现）
++                                let id = tc_delta["id"]
++                                    .as_str()
++                                    .unwrap_or("")
++                                    .to_string();
++                                let name = tc_delta["function"]["name"]
++                                    .as_str()
++                                    .unwrap_or("")
++                                    .to_string();
++                                let args = tc_delta["function"]["arguments"]
++                                    .as_str()
++                                    .unwrap_or("")
++                                    .to_string();
++                                tc_buffer.insert(idx, (id, name, args));
++                            }
++                        }
++                    }
++
++                    // finish_reason
++                    if let Some(fr) = parsed["choices"][0]["finish_reason"].as_str() {
++                        finish_reason = Some(fr.to_string());
++                    }
++
++                    // usage
++                    if let Some(u) = parsed.get("usage") {
++                        usage = Some(TokenUsage {
++                            input_tokens: u["input_tokens"]
++                                .as_u64()
++                                .or_else(|| u["prompt_tokens"].as_u64())
++                                .unwrap_or(0) as u32,
++                            output_tokens: u["output_tokens"]
++                                .as_u64()
++                                .or_else(|| u["completion_tokens"].as_u64())
++                                .unwrap_or(0) as u32,
++                            reasoning_tokens: u["completion_tokens_details"]
++                                .get("reasoning_tokens")
++                                .and_then(|v| v.as_u64())
++                                .map(|v| v as u32),
++                            total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
++                        });
++
++                        let _ = app_handle.emit(
++                            "mind-stream",
++                            MindStreamEvent::Usage {
++                                input_tokens: usage.as_ref().map(|u| u.input_tokens),
++                                output_tokens: usage.as_ref().map(|u| u.output_tokens),
++                                reasoning_tokens: usage
++                                    .as_ref()
++                                    .and_then(|u| u.reasoning_tokens),
++                                total_tokens: usage.as_ref().map(|u| u.total_tokens),
++                            },
++                        );
++                    }
++                }
++            }
++        }
++    }
++
++    // 流结束：解析累积的 tool_calls
++    let tool_calls: Vec<ToolCall> = {
++        let mut indices: Vec<i64> = tc_buffer.keys().copied().collect();
++        indices.sort(); // 保持 index 顺序
++        indices
++            .into_iter()
++            .filter_map(|idx| {
++                let (id, name, arguments) = tc_buffer.remove(&idx)?;
++                if name.is_empty() {
++                    return None; // 只有 arguments 无 name → 异常碎片，丢弃
++                }
++                Some(ToolCall {
++                    id,
++                    kind: Some("function".into()),
++                    function: ToolCallFunction { name, arguments },
++                })
++            })
++            .collect()
++    };
++
++    // 构建 assistant message（OpenAI 格式）
++    let mut message = serde_json::json!({
++        "role": "assistant",
++        "content": if full_text.is_empty() { serde_json::json!(null) } else { serde_json::json!(full_text) },
++    });
++    if !tool_calls.is_empty() {
++        let tc_json: Vec<Value> = tool_calls
++            .iter()
++            .map(|tc| {
++                serde_json::json!({
++                    "id": tc.id,
++                    "type": "function",
++                    "function": {
++                        "name": tc.function.name,
++                        "arguments": tc.function.arguments,
++                    }
++                })
++            })
++            .collect();
++        message["tool_calls"] = serde_json::json!(tc_json);
++    }
++
++    let content: Option<String> = if full_text.is_empty() {
++        None
++    } else {
++        Some(full_text.clone())
++    };
++    let reasoning_content: Option<String> = if reasoning_text.is_empty() {
++        None
++    } else {
++        Some(reasoning_text)
++    };
++
++    // 日志（同 chat_turn_done 格式）
++    let content_chars = content.as_deref().unwrap_or("").chars().count();
++    let content_preview: String = content
++        .as_deref()
++        .unwrap_or("")
++        .chars()
++        .take(500)
++        .collect();
++    let reasoning_chars = reasoning_content
++        .as_deref()
++        .map(|r| r.chars().count())
++        .unwrap_or(0);
++    let reasoning_preview: Option<String> = if content_chars == 0 {
++        reasoning_content
++            .as_deref()
++            .map(|r| r.chars().take(300).collect())
++    } else {
++        None
++    };
+     log::debug!(
+         target: "agent",
+-        "[llm] phase=chat_turn_done finish={:?} tool_calls={} duration_ms={} total_tokens={}",
++        "[llm] phase=stream_chat_turn_done finish={:?} tool_calls={} content_chars={content_chars} \
++         reasoning_chars={reasoning_chars} reasoning_preview={:?} \
++         content_preview={:?} duration_ms={} total_tokens={}",
+         finish_reason,
+         tool_calls.len(),
++        reasoning_preview,
++        content_preview,
+         req_start.elapsed().as_millis(),
+         usage.as_ref().map(|u| u.total_tokens).unwrap_or(0)
+     );
+diff --git a/docs/设计文档/AI与模型/Agent 开发计划.md b/docs/设计文档/AI与模型/Agent 开发计划.md
+index 1717624..073b26f 100644
+--- a/docs/设计文档/AI与模型/Agent 开发计划.md	
++++ b/docs/设计文档/AI与模型/Agent 开发计划.md	
+@@ -1,7 +1,7 @@
+ # Agent 开发计划
+ 
+-> 编写日期：2026-06-22
+-> 状态：**计划已确认，待 Phase 0 开工**
++> 编写日期：2026-06-22（更新于 2026-06-23 夜间）
++> 状态：**Phase 0–3 + Spike 流式 全完成，`cargo check` 0 错误；已通过真实 key 运行验证（本地文档炼化通过），视频/URL 链路待测**
+ > 架构决策权威：[`Agent架构设计.md`](./Agent架构设计.md)（本文件是其 §十分阶段实施的可执行细化）
+ > 模型层：[`AI多模型接入架构设计.md`](./AI多模型接入架构设计.md)
+ > 跟踪：本文档任务 + [`docs/项目管理/开发任务清单.md`](../../项目管理/开发任务清单.md)
+@@ -340,8 +340,8 @@ packages/core/prompts/agent/charter.md   # agent charter 模板（Phase 0 后的
+ |------|------|------|----------|
+ | Phase 0 提示词共享化 | ✅ | cargo check ✓ | `.md` 迁至 `packages/core/prompts/`；`prompt_manager` 优先认 core；`tauri.conf.json` resources 指向 core；删 core TS 死代码 + 清 `index.ts` |
+ | Phase 1 工具封装 | ✅ | cargo check ✓ | `commands/tools/`（`ToolSpec`+`ToolHandler`+`ToolOutput` artifact 化+`ToolRegistry`）+ 13 个 handler（acquire 9 / analyze 2 / io 2） |
+-| Spike tool use 契约 | ⚠️ 未实证 | 仅按官方文档 | 按 DeepSeek 官方 OpenAI 兼容格式实现（非流式）；**未用真实 API 验证** |
+-| Phase 2 Agent Loop | ✅ | cargo check ✓ | `agent/{runner,charter,context,mod}` + `deepseek::chat_turn` + `agent/charter.md`；六阶段骨架 + TaskState + 护栏(MAX_STEPS) + 分块流式发出 |
++| Spike tool use 契约 | ✅ 已验证 | 2026-06-23 流式实证 | 流式 tool_calls delta 分片累积（`index` 分桶 + arguments 拼接）+ `stream_chat_turn` 实现（DeepSeek SSE 流式，~230 行）；`chat_turn` 退役 |
++| Phase 2 Agent Loop | ✅ | cargo check ✓ | `agent/{runner,charter,context,mod}` + `deepseek::stream_chat_turn` + `agent/charter.md`；六阶段骨架 + TaskState + 护栏(MAX_STEPS) + 流式 mind-stream 推送 |
+ | Phase 3 接线删旧 | ✅ | cargo check ✓（0 error） | `execute_pipeline` 改调度 agent；`persist_note` 落盘；删 `run_{video,audio,text}_pipeline` + 专属 helper + `engine::generate_note`；前端兼容性已核查 |
+ 
+ ### 对抗审查与修复（2026-06-22）
+@@ -384,10 +384,49 @@ packages/core/prompts/agent/charter.md   # agent charter 模板（Phase 0 后的
+ 
+ ---
+ 
++### 运行期调试增强（2026-06-23）
++
++> **问题**：agent 调试时 dev 日志只输出 LLM 元数据，完全不输出模型实际回复内容、工具调用参数、工具返回结果。排查问题极其困难。
++
++**修复历程**（同日迭代 3 轮）：
++
++| 轮次 | 改动 | 文件 |
++|------|------|------|
++| 1 | 双层日志：dev 日志 300–500 字预览 + 用户面板 80–100 字简述 | `deepseek.rs` + `runner.rs` (+122 行) |
++| 2 | 用户面板改为完整输出（去掉 80/100 字截断）+ `reasoning_content` 回退修复 | `runner.rs` |
++| 3 | **流式 tool_calls**：`stream_chat_turn` 替代 `chat_turn`，agent 推理实时经 mind-stream 推送前端 | `deepseek.rs` (+230 行) + `runner.rs` |
++
++**最终日志体系**：
++
++| 层 | 目标 | 详细度 | 通道 |
++|---|------|--------|------|
++| Dev 日志 | F12 Console + 日志文件 | 300–500 字符预览 | `log::debug!(target: "agent")` |
++| 用户面板 | 炼化日志 UI | **完整输出**（不截断） | `emit_progress(detail=...)` → `log("info")` |
++| 笔记预览区 | 前端笔记区 | **实时流式** | `mind-stream` Delta 事件 |
++
++**最终改动清单**（2 文件，+355 行）：
++
++| 位置 | 新增内容 | 通道 |
++|------|---------|------|
++| `deepseek.rs::stream_chat_turn_done` | 流式完成日志（finish / tool_calls / content_preview / reasoning_chars / reasoning_preview） | Dev |
++| `deepseek.rs::chat_turn_done` | 响应内容预览 `content_preview`（500 字）+ `reasoning_chars` + `reasoning_preview`（content 空时展示） | Dev |
++| `deepseek.rs::stream_deepseek` | 流式输出预览 `output_preview`（500 字） | Dev |
++| `deepseek.rs` 工具调用后 | 工具调用明细（函数名 + 参数 200 字） | Dev |
++| `runner.rs` 推理轮 | agent 每轮分析文本（500 字 dev + **完整文本**用户面板 `💭 agent 分析`） | 双层 |
++| `runner.rs` 工具调用 | 完整参数 JSON 进 `emit_progress` detail | 用户面板 |
++| `runner.rs` 工具结果 | 返回结果预览（300 字 dev）+ **完整结果**用户面板（`← xxx 完成/失败`） | 双层 |
++| `runner.rs` agent 终止 | 笔记预览 + reasoning_chars + fell_back 标记（dev）+ `📝 正在总结笔记…`（用户面板） | 双层 |
++
++**附加修复**：DeepSeek thinking mode 下 `content` 为空但 `reasoning_content` 有正文 → terminate 自动回退 + `log::warn!` 标记。
++
++**前端无改动**：`emit_progress(detail)` → `pushLog("info")` 链路已存在，`mind-stream` Delta/Done 事件保持不变。
++
++---
++
+ ### 实现偏离与简化（均标注于代码注释）
+ 
+ 1. **媒体函数 `pub(crate)` 原地共享** —— 未物理搬到 `commands/tools/media/`（降低无运行时验证下的 churn 风险），功能等价；物理搬移留作后续。
+-2. **DeepSeek tool use 非流式** —— Spike 未实证，按官方 OpenAI 兼容规范实现；流式 + tool_call 分片累积未做。
++2. **流式 tool_calls 已实现**（2026-06-23）—— `stream_chat_turn` 替代了非流式 `chat_turn`，SSE 分片累积 tool_calls delta（`index` 分桶 + `arguments` 拼接），agent 推理实时可见。~~Spike 未实证~~ 已实证，`chat_turn` 保留为死代码待后续清理。
+ 3. **无阶段边界 context 清零**（设计 §6.6.4，标 P1 延后）—— v1 靠 artifact 化 + 1M 窗口承载；`Cycle Restart` 同延后。
+ 4. **花费开关未接 config** —— `allow_paid=true` 默认；`query_ai_douyin` 标 Paid 但默认可见。
+ 5. **`persist_note` 不更新 `.myriad-mind/` 索引与指纹** —— 已知回归（原 run_* 有），后续补 library 接入。

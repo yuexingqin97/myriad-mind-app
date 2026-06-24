@@ -1,0 +1,17 @@
+[1m
+Impact of changing "stream_chat_turn" — 4 affected symbols:
+[0m
+[36mapps/desktop/src-tauri/src/commands/ai/deepseek.rs[0m
+  [2mfunction    [0mstream_chat_turn[2m:500[0m
+  [2mfile        [0mdeepseek.rs[2m:1[0m
+
+[36mapps/desktop/src-tauri/src/agent/runner.rs[0m
+  [2mfunction    [0mrun[2m:60[0m
+  [2mfile        [0mrunner.rs[2m:1[0m
+
+[1m
+Callers of "stream_chat_turn" (1):
+[0m
+[36mfunction    [0m[37mrun[0m
+[2m  apps/desktop/src-tauri/src/agent/runner.rs:60[0m
+
