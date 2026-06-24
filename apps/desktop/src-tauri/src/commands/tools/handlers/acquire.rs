@@ -14,7 +14,8 @@ use crate::commands::fs::{read_text_file, scan_directory};
 use crate::commands::pipeline::{
     download_douyin_video, download_video_ytdlp, extract_audio_ffmpeg, InputMode,
 };
-use crate::commands::python::{download_youtube_subtitles, list_ai_douyin_tasks, transcribe_audio};
+use crate::commands::ai_douyin::list_ai_douyin_tasks;
+use crate::commands::python::{download_youtube_subtitles, transcribe_audio};
 use crate::commands::tools::{
     ArtifactKind, ArtifactRef, Cost, Phase, ToolContext, ToolFuture, ToolHandler, ToolOutput,
     ToolSpec, opt_str, require_str,
@@ -604,7 +605,7 @@ impl ToolHandler for QueryAiDouyinHandler {
         }
     }
 
-    fn handle<'a>(&'a self, ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
+    fn handle<'a>(&'a self, _ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
         Box::pin(async move {
             // 1. 取 api_key（缺失即配置错误，不脱敏，因为不涉及上游响应）
             let api_key = read_config_value("ai_douyin_api_key").ok_or_else(|| {
@@ -615,11 +616,10 @@ impl ToolHandler for QueryAiDouyinHandler {
             let search = opt_str(&params, "search");
             let status = opt_str(&params, "status");
 
-            // 3. 查询（失败时 stderr 可能含明文 key，统一脱敏不回喂）
+            // 3. 查询（Rust 直连 reqwest，无 Python 中转；失败统一脱敏不回喂）
             let list = list_ai_douyin_tasks(
-                ctx.python_path.clone(),
                 api_key,
-                None, // api_base 用脚本默认
+                None, // api_base 用默认 https://ai-douyin.top9.cc
                 None, // page
                 None, // page_size
                 status,
@@ -627,11 +627,11 @@ impl ToolHandler for QueryAiDouyinHandler {
             )
             .await
             .map_err(|e| {
-                // ⚠️ stderr 可能含 --api-key <明文> 回显（argparse 报错 / 崩溃栈）
-                // 不回原始错误原文，只给脱敏提示；详情走开发者日志。
+                // reqwest 直连不再经 argv 回显 --api-key；但保守起见仍不回原始错误原文，
+                // 只给脱敏提示；详情走开发者日志。
                 log::warn!(
                     target: "agent",
-                    "[tool:query_ai_douyin] failed (stderr redacted): {e}"
+                    "[tool:query_ai_douyin] failed (redacted): {e}"
                 );
                 AppError::Other("AI Douyin 查询失败（已脱敏，详情见日志文件）".into())
             })?;

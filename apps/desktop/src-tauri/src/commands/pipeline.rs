@@ -689,12 +689,32 @@ pub(crate) async fn download_douyin_video(
         args.push(douyin_key);
     }
 
-    let result = crate::commands::python::run_python_script(
-        python_path,
-        "download_video_candidates.py",
-        &args,
+    // 总超时兜底：download_video_candidates.py 的 urllib timeout=30 是 socket 级
+    // （单次 read 30s），慢速 CDN 会无限 dribble 导致永久卡死。
+    // 此处用 tokio::time::timeout 包裹，超时则 drop future → run_python_script 的
+    // kill_on_drop 杀掉子进程 → 返回错误，由上层 acquire.rs 对 B 站自动 fallback yt-dlp。
+    const DOWNLOAD_TIMEOUT_SECS: u64 = 300;
+    let result = match tokio::time::timeout(
+        std::time::Duration::from_secs(DOWNLOAD_TIMEOUT_SECS),
+        crate::commands::python::run_python_script(
+            python_path,
+            "download_video_candidates.py",
+            &args,
+        ),
     )
-    .await?;
+    .await
+    {
+        Ok(r) => r?,
+        Err(_elapsed) => {
+            log::warn!(
+                target: "agent",
+                "[douyin] download timed out after {DOWNLOAD_TIMEOUT_SECS}s — subprocess killed"
+            );
+            return Err(AppError::Other(format!(
+                "视频下载超时（{DOWNLOAD_TIMEOUT_SECS} 秒已中止）。可能直链 CDN 过慢或代理异常；B 站将自动改用 yt-dlp 重试。"
+            )));
+        }
+    };
 
     if !result.success {
         return Err(AppError::PythonScript {
@@ -842,60 +862,42 @@ pub(crate) fn extract_audio_ffmpeg(video: &PathBuf, audio: &PathBuf) -> Result<(
     Ok(())
 }
 
-/// 调用 extract_keyframes.py（支持可选的引导时间点），返回截图输出目录
+/// 关键帧抽取（Rust 直调 FFmpeg，原 extract_keyframes.py 已迁 commands/media.rs）
 /// 只使用 smart 模式：字幕引导时间点 + 场景变化检测，不使用固定间隔
 pub(crate) fn extract_keyframes_guided(
-    python_path: &str,
     video: &PathBuf,
     output_dir: &PathBuf,
     guided_timestamps: Option<&std::path::Path>,
 ) -> Result<PathBuf, AppError> {
-    use crate::commands::python::run_python_script;
-
     if !video.exists() {
         return Err(AppError::Other("视频文件不存在".into()));
     }
 
-    let mut args: Vec<String> = vec![
-        "--video".into(),
-        video.to_string_lossy().to_string(),
-        "--output-dir".into(),
-        output_dir.to_string_lossy().to_string(),
-        // 强制 scene 模式（不使用固定间隔）
-        "--mode".into(),
-        "scene".into(),
-        "--max-frames".into(),
-        "40".into(),
-        "--scene-threshold".into(),
-        "0.25".into(),
-        "--max-gap".into(),
-        "120".into(),
-        "--min-gap".into(),
-        "3".into(),
-    ];
-
-    if let Some(ts_path) = guided_timestamps {
+    // 引导时间戳文件存在才传入（与原脚本 --timestamps 行为一致）
+    let ts_arg: Option<String> = guided_timestamps.and_then(|ts_path| {
         if ts_path.exists() {
-            args.push("--timestamps".into());
-            args.push(ts_path.to_string_lossy().to_string());
             log::debug!(target: "agent",
                 "[pipeline] keyframes extraction with guided timestamps: {}",
                 ts_path.display()
             );
+            Some(ts_path.to_string_lossy().to_string())
+        } else {
+            None
         }
-    }
+    });
 
-    let result = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(async { run_python_script(python_path, "extract_keyframes.py", &args).await })
-    })?;
-
-    if !result.success {
-        return Err(AppError::PythonScript {
-            script: "extract_keyframes".into(),
-            stderr: result.stderr,
-        });
-    }
+    // 参数与原脚本调用逐字一致：scene 模式 / max_frames 40 / 阈值 0.25 / gap 120·3
+    crate::commands::media::extract_keyframes_impl(
+        &video.to_string_lossy(),
+        output_dir,
+        "scene",
+        30, // interval（scene 模式不使用，仅占位与脚本默认一致）
+        40, // max_frames
+        ts_arg.as_deref(),
+        0.25,  // scene_threshold
+        3.0,   // min_gap
+        120.0, // max_gap
+    )?;
 
     Ok(output_dir.clone())
 }

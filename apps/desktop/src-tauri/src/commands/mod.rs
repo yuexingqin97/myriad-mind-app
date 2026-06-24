@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_douyin;
 pub mod code_project;
 pub mod config;
 pub mod deps;
@@ -6,6 +7,7 @@ pub mod fetch;
 pub mod fs;
 pub mod library;
 pub mod logging;
+pub mod media;
 pub mod notes;
 pub mod pipeline;
 pub mod python;

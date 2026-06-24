@@ -1,6 +1,7 @@
 // ============================================================
 // Python 脚本调度 — 统一子进程调用模式
-// 封装全部 6 个上游脚本为类型安全的 Rust 调用
+// 封装剩余上游 Python 脚本（whisper/yt-dlp 硬依赖）为类型安全调用；
+// extract_keyframes / list_ai_douyin_tasks 已迁 Rust 直连（见 media.rs / ai_douyin.rs）
 // ============================================================
 
 use crate::error::AppError;
@@ -281,6 +282,9 @@ pub async fn run_python_script(
 
     let (program, prefix_args) = python_command_parts(python_path);
     let output = Command::new(program)
+        // 超时/取消时 kill 子进程，防止下载类脚本卡死留孤儿
+        // （见 download_douyin_video 的 tokio::time::timeout 总超时兜底）
+        .kill_on_drop(true)
         .args(prefix_args)
         .arg(&script)
         .args(args)
@@ -363,7 +367,7 @@ async fn run_and_parse<T: serde::de::DeserializeOwned>(
 }
 
 // ============================================================
-// 6 个脚本的类型化封装
+// 剩余 4 个脚本的类型化封装（whisper/yt-dlp 硬依赖，保留 Python 子进程）
 // ============================================================
 
 // ---- 1. transcribe_faster_whisper.py ----
@@ -422,60 +426,7 @@ pub async fn transcribe_audio(
     .await
 }
 
-// ---- 2. extract_keyframes.py ----
-
-/// 关键帧提取结果
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyframeResult {
-    pub result: KeyframeData,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyframeData {
-    pub video_path: String,
-    pub output_dir: String,
-    pub mode: String,
-    pub interval: u32,
-    pub max_frames: u32,
-    pub keyframes: Vec<KeyframeInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyframeInfo {
-    pub file: String,
-    pub timestamp_seconds: f64,
-    pub timestamp_label: String,
-}
-
-/// 执行关键帧提取
-#[tauri::command]
-pub async fn extract_keyframes(
-    video_path: String,
-    output_dir: String,
-    python_path: String,
-    interval: u32,
-    max_frames: u32,
-    mode: String,
-) -> Result<KeyframeResult, AppError> {
-    run_and_parse(
-        &python_path,
-        "extract_keyframes.py",
-        &[
-            "--video".into(),
-            video_path,
-            "--output-dir".into(),
-            output_dir,
-            "--interval".into(),
-            interval.to_string(),
-            "--max-frames".into(),
-            max_frames.to_string(),
-            "--mode".into(),
-            mode,
-        ],
-        "关键帧提取",
-    )
-    .await
-}
+// ---- 2. extract_keyframes → 已迁至 commands/media.rs（Rust 直调 FFmpeg）----
 
 // ---- 3. download_video_candidates.py ----
 
@@ -583,59 +534,6 @@ pub async fn install_faster_whisper(
         "install_faster_whisper.py",
         &args,
         "faster-whisper 安装",
-    )
-    .await
-}
-
-// ---- 6. list_ai_douyin_tasks.py ----
-
-/// AI Douyin 任务列表结果
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AiDouyinTaskList {
-    // API 返回的 JSON 结构，此处用 Value 兜底
-    #[serde(flatten)]
-    pub data: serde_json::Value,
-}
-
-/// 查询 AI Douyin 任务列表
-#[tauri::command]
-pub async fn list_ai_douyin_tasks(
-    python_path: String,
-    api_key: String,
-    api_base: Option<String>,
-    page: Option<u32>,
-    page_size: Option<u32>,
-    status: Option<String>,
-    search: Option<String>,
-) -> Result<AiDouyinTaskList, AppError> {
-    let mut args = vec!["--api-key".into(), api_key, "--json".into()];
-
-    if let Some(base) = api_base {
-        args.push("--api-base".into());
-        args.push(base);
-    }
-    if let Some(p) = page {
-        args.push("--page".into());
-        args.push(p.to_string());
-    }
-    if let Some(ps) = page_size {
-        args.push("--page-size".into());
-        args.push(ps.to_string());
-    }
-    if let Some(s) = status {
-        args.push("--status".into());
-        args.push(s);
-    }
-    if let Some(q) = search {
-        args.push("--search".into());
-        args.push(q);
-    }
-
-    run_and_parse(
-        &python_path,
-        "list_ai_douyin_tasks.py",
-        &args,
-        "AI Douyin 任务",
     )
     .await
 }
