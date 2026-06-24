@@ -1,0 +1,10 @@
+commit e60595f5211c0b61c340e74f16e6ee731f56d0ff
+Author: Yxqin <yxqin@users.noreply.github.com>
+Date:   Tue Jun 23 22:42:14 2026 +0800
+
+    feat: 改为流式传输，日志显示ai 推理过程
+
+ apps/desktop/src-tauri/src/agent/runner.rs         | 140 ++++++--
+ apps/desktop/src-tauri/src/commands/ai/deepseek.rs | 359 ++++++++++++++++++++-
+ docs/设计文档/AI与模型/Agent 开发计划.md           |  49 ++-
+ 3 files changed, 514 insertions(+), 34 deletions(-)
