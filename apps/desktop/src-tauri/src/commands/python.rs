@@ -1,6 +1,7 @@
 // ============================================================
 // Python 脚本调度 — 统一子进程调用模式
-// 封装全部 6 个上游脚本为类型安全的 Rust 调用
+// 封装剩余 4 个上游脚本为类型安全的 Rust 调用
+// （list_ai_douyin_tasks / extract_keyframes 已迁移为 Rust 原生实现）
 // ============================================================
 
 use crate::error::AppError;
@@ -26,8 +27,8 @@ fn is_token_char(c: char) -> bool {
 /// 时把明文密钥写进日志（Folder 文件 + Webview devtools + Stdout 三处）。
 ///
 /// 覆盖三类已知泄漏形态：
-/// 1. `--api-key <value>` / `--api-key=<value>`：argv 回显（list_ai_douyin_tasks /
-///    download_video_candidates 都会把 douyin_key 作为命令行参数传入）
+/// 1. `--api-key <value>` / `--api-key=<value>`：argv 回显
+///    （download_video_candidates 会把 douyin_key 作为命令行参数传入）
 /// 2. `Bearer xxx` / `X-API-Key: xxx` / `Authorization: xxx`：HTTP 头回显
 /// 3. 长度 ≥ 32 的连续 base64/hex 字符串：裸 token 兜底（覆盖未知参数名）
 ///
@@ -422,62 +423,7 @@ pub async fn transcribe_audio(
     .await
 }
 
-// ---- 2. extract_keyframes.py ----
-
-/// 关键帧提取结果
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyframeResult {
-    pub result: KeyframeData,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyframeData {
-    pub video_path: String,
-    pub output_dir: String,
-    pub mode: String,
-    pub interval: u32,
-    pub max_frames: u32,
-    pub keyframes: Vec<KeyframeInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyframeInfo {
-    pub file: String,
-    pub timestamp_seconds: f64,
-    pub timestamp_label: String,
-}
-
-/// 执行关键帧提取
-#[tauri::command]
-pub async fn extract_keyframes(
-    video_path: String,
-    output_dir: String,
-    python_path: String,
-    interval: u32,
-    max_frames: u32,
-    mode: String,
-) -> Result<KeyframeResult, AppError> {
-    run_and_parse(
-        &python_path,
-        "extract_keyframes.py",
-        &[
-            "--video".into(),
-            video_path,
-            "--output-dir".into(),
-            output_dir,
-            "--interval".into(),
-            interval.to_string(),
-            "--max-frames".into(),
-            max_frames.to_string(),
-            "--mode".into(),
-            mode,
-        ],
-        "关键帧提取",
-    )
-    .await
-}
-
-// ---- 3. download_video_candidates.py ----
+// ---- 2. download_video_candidates.py ----
 
 /// 视频下载结果
 #[derive(Debug, Serialize, Deserialize)]
@@ -515,7 +461,7 @@ pub async fn download_video(
     .await
 }
 
-// ---- 4. download_youtube_subtitles.py ----
+// ---- 3. download_youtube_subtitles.py ----
 
 /// YouTube 字幕下载结果
 #[derive(Debug, Serialize, Deserialize)]
@@ -555,7 +501,7 @@ pub async fn download_youtube_subtitles(
     .await
 }
 
-// ---- 5. install_faster_whisper.py ----
+// ---- 4. install_faster_whisper.py ----
 
 /// faster-whisper 安装结果
 #[derive(Debug, Serialize, Deserialize)]
@@ -583,59 +529,6 @@ pub async fn install_faster_whisper(
         "install_faster_whisper.py",
         &args,
         "faster-whisper 安装",
-    )
-    .await
-}
-
-// ---- 6. list_ai_douyin_tasks.py ----
-
-/// AI Douyin 任务列表结果
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AiDouyinTaskList {
-    // API 返回的 JSON 结构，此处用 Value 兜底
-    #[serde(flatten)]
-    pub data: serde_json::Value,
-}
-
-/// 查询 AI Douyin 任务列表
-#[tauri::command]
-pub async fn list_ai_douyin_tasks(
-    python_path: String,
-    api_key: String,
-    api_base: Option<String>,
-    page: Option<u32>,
-    page_size: Option<u32>,
-    status: Option<String>,
-    search: Option<String>,
-) -> Result<AiDouyinTaskList, AppError> {
-    let mut args = vec!["--api-key".into(), api_key, "--json".into()];
-
-    if let Some(base) = api_base {
-        args.push("--api-base".into());
-        args.push(base);
-    }
-    if let Some(p) = page {
-        args.push("--page".into());
-        args.push(p.to_string());
-    }
-    if let Some(ps) = page_size {
-        args.push("--page-size".into());
-        args.push(ps.to_string());
-    }
-    if let Some(s) = status {
-        args.push("--status".into());
-        args.push(s);
-    }
-    if let Some(q) = search {
-        args.push("--search".into());
-        args.push(q);
-    }
-
-    run_and_parse(
-        &python_path,
-        "list_ai_douyin_tasks.py",
-        &args,
-        "AI Douyin 任务",
     )
     .await
 }

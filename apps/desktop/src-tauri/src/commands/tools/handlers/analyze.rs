@@ -11,7 +11,7 @@ use crate::commands::tools::{
 use crate::error::AppError;
 use std::path::PathBuf;
 
-/// 关键帧抽取：调 extract_keyframes.py（scene 模式 + 可选引导时间戳），
+/// 关键帧抽取：原生 FFmpeg 调用（scene 模式 + 可选引导时间戳），
 /// 把 .png 截图目录以 Screenshots artifact 引用回喂。
 pub struct ExtractKeyframesHandler;
 
@@ -59,7 +59,7 @@ impl ToolHandler for ExtractKeyframesHandler {
                 guided,
             )?;
 
-            // 3. extract_keyframes.py 把 PNG + keyframes.json 落在 output_dir/frames/ 子目录
+            // 3. 原生关键帧提取把 PNG + keyframes.json 落在 output_dir/frames/ 子目录
             //    （脚本内 frames_dir = output_dir/"frames"）。统计该子目录下 .png 数量。
             let frames_dir = output_dir.join("frames");
             let mut frame_count: u64 = 0;

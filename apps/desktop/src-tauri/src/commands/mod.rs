@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_douyin;
 pub mod code_project;
 pub mod config;
 pub mod deps;

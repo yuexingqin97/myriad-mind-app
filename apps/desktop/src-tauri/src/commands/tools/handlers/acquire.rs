@@ -7,6 +7,7 @@
 // 只回 ArtifactRef；小结果（小文件 / 目录树 / 任务列表）直接 ToolOutput::text。
 // ============================================================
 
+use crate::commands::ai_douyin::list_ai_douyin_tasks;
 use crate::commands::code_project::{format_code_project_for_ai, scan_code_project};
 use crate::commands::config::read_config_value;
 use crate::commands::fetch::{fetch_article, format_article_for_ai};
@@ -14,7 +15,7 @@ use crate::commands::fs::{read_text_file, scan_directory};
 use crate::commands::pipeline::{
     download_douyin_video, download_video_ytdlp, extract_audio_ffmpeg, InputMode,
 };
-use crate::commands::python::{download_youtube_subtitles, list_ai_douyin_tasks, transcribe_audio};
+use crate::commands::python::{download_youtube_subtitles, transcribe_audio};
 use crate::commands::tools::{
     ArtifactKind, ArtifactRef, Cost, Phase, ToolContext, ToolFuture, ToolHandler, ToolOutput,
     ToolSpec, opt_str, require_str,

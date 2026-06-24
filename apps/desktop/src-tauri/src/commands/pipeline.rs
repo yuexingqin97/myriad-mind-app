@@ -842,60 +842,592 @@ pub(crate) fn extract_audio_ffmpeg(video: &PathBuf, audio: &PathBuf) -> Result<(
     Ok(())
 }
 
-/// 调用 extract_keyframes.py（支持可选的引导时间点），返回截图输出目录
+// ============================================================
+// 关键帧提取 — Rust 原生 FFmpeg 调用（替代 extract_keyframes.py）
+// 复刻 Python 脚本三模式：guided / interval / scene，参数与输出格式完全一致
+// ============================================================
+
+/// 关键帧提取结果（Tauri 命令返回，从 python.rs 迁移）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KeyframeResult {
+    pub result: KeyframeData,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KeyframeData {
+    pub video_path: String,
+    pub output_dir: String,
+    pub mode: String,
+    pub interval: u32,
+    pub max_frames: u32,
+    pub keyframes: Vec<KeyframeInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KeyframeInfo {
+    pub file: String,
+    pub timestamp_seconds: f64,
+    pub timestamp_label: String,
+}
+
+/// 内部帧条目（含 trigger 字段，写入 keyframes.json 供 Vision 审查读取）
+struct KeyframeEntry {
+    file: String,
+    timestamp_seconds: f64,
+    timestamp_label: String,
+    trigger: String,
+}
+
+/// 时间戳标签 — 复刻 Python `timestamp_label`：`03m03s` / `01h03m03s`
+fn kf_timestamp_label(seconds: f64) -> String {
+    let s = std::cmp::max(0, seconds.round() as i64);
+    let (minutes, sec) = (s / 60, s % 60);
+    let (hours, min) = (minutes / 60, minutes % 60);
+    if hours > 0 {
+        format!("{hours:02}h{min:02}m{sec:02}s")
+    } else {
+        format!("{min:02}m{sec:02}s")
+    }
+}
+
+/// reason 转文件名安全 slug — 复刻 Python `slug_reason`：
+/// 空白转 `_`，保留 \w / CJK / `_` / `-`，截断 24 字符，空则 `guided`
+fn kf_slug_reason(reason: &str) -> String {
+    let cleaned: String = reason
+        .trim()
+        .chars()
+        .map(|c| if c.is_whitespace() { '_' } else { c })
+        .collect();
+    let filtered: String = cleaned
+        .chars()
+        .filter(|c| {
+            c.is_alphanumeric() || matches!(*c, '_' | '-') || ('\u{4e00}'..='\u{9fff}').contains(c)
+        })
+        .collect();
+    let truncated: String = filtered.chars().take(24).collect();
+    if truncated.is_empty() {
+        "guided".to_string()
+    } else {
+        truncated
+    }
+}
+
+/// 加载引导时间戳 JSON — 复刻 Python `load_guided_timestamps`：
+/// 接受 `{timestamps: [...]}` 或裸数组，元素为数字或 `{ts, reason}`，
+/// 按 ts 排序去重（2 秒间隔），返回 `(ts, reason)` 列表
+fn load_guided_timestamps(path: Option<&std::path::Path>) -> Vec<(f64, String)> {
+    let path = match path {
+        Some(p) if p.exists() => p,
+        _ => return Vec::new(),
+    };
+
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+
+    let raw: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let items = raw.get("timestamps").unwrap_or(&raw);
+    let arr = match items.as_array() {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+
+    let mut result: Vec<(f64, String)> = Vec::new();
+    for item in arr {
+        if let Some(num) = item.as_f64() {
+            if num >= 0.0 {
+                result.push((num, "AI推荐".to_string()));
+            }
+        } else if let Some(obj) = item.as_object() {
+            let ts = obj
+                .get("ts")
+                .or_else(|| obj.get("timestamp"))
+                .or_else(|| obj.get("timestamp_seconds"))
+                .and_then(|v| v.as_f64());
+            if let Some(ts) = ts {
+                if ts >= 0.0 {
+                    let reason = obj
+                        .get("reason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("AI推荐")
+                        .to_string();
+                    result.push((ts, reason));
+                }
+            }
+        }
+    }
+
+    result.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut deduped: Vec<(f64, String)> = Vec::new();
+    for (ts, reason) in result {
+        if deduped
+            .last()
+            .map_or(false, |(last_ts, _)| (ts - last_ts).abs() < 2.0)
+        {
+            continue;
+        }
+        deduped.push((ts, reason));
+    }
+    deduped
+}
+
+/// 引导截图 — 按指定时间点逐帧提取，复刻 Python `extract_guided_frames`
+fn extract_guided_frames(
+    video: &std::path::Path,
+    frames_dir: &std::path::Path,
+    timestamps: &[(f64, String)],
+    max_frames: usize,
+    ffmpeg: &str,
+) -> Result<Vec<KeyframeEntry>, AppError> {
+    for (index, (ts, reason)) in timestamps.iter().take(max_frames).enumerate() {
+        let idx = index + 1;
+        let slug = kf_slug_reason(reason);
+        let output = frames_dir.join(format!("guided_{idx:04}_{slug}.png"));
+        let mut cmd = std::process::Command::new(ffmpeg);
+        apply_windows_no_window(&mut cmd);
+        let status = cmd
+            .args([
+                "-ss",
+                &format!("{ts:.3}"),
+                "-i",
+                &video.to_string_lossy(),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                "-y",
+                &output.to_string_lossy(),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|e| AppError::Other(format!("FFmpeg 引导截图执行失败: {e}")))?;
+
+        if !status.success() {
+            log::warn!(
+                "[keyframes] guided frame {idx} at {ts:.3}s failed (exit {:?})",
+                status.code()
+            );
+        }
+    }
+
+    // 收集生成的 guided 帧
+    let mut keyframes = Vec::new();
+    for (index, (ts, reason)) in timestamps.iter().take(max_frames).enumerate() {
+        let idx = index + 1;
+        let slug = kf_slug_reason(reason);
+        let output = frames_dir.join(format!("guided_{idx:04}_{slug}.png"));
+        if output.exists() {
+            keyframes.push(KeyframeEntry {
+                file: output
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+                timestamp_seconds: *ts,
+                timestamp_label: kf_timestamp_label(*ts),
+                trigger: format!("guided:{reason}"),
+            });
+        }
+    }
+    Ok(keyframes)
+}
+
+/// 间隔截图 — 固定间隔提取，复刻 Python `extract_interval_frames`
+fn extract_interval_frames(
+    video: &std::path::Path,
+    frames_dir: &std::path::Path,
+    interval: u32,
+    max_frames: u32,
+    ffmpeg: &str,
+) -> Result<Vec<KeyframeEntry>, AppError> {
+    let fps = 1.0 / interval as f64;
+    let filter_v = format!("fps={fps:.6}");
+    let pattern = frames_dir.join("frame_%04d.png");
+
+    let mut cmd = std::process::Command::new(ffmpeg);
+    apply_windows_no_window(&mut cmd);
+    let status = cmd
+        .args([
+            "-i",
+            &video.to_string_lossy(),
+            "-vf",
+            &filter_v,
+            "-frames:v",
+            &max_frames.to_string(),
+            "-q:v",
+            "2",
+            "-y",
+            &pattern.to_string_lossy(),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|e| AppError::Other(format!("FFmpeg 间隔截图执行失败: {e}")))?;
+
+    if !status.success() {
+        return Err(AppError::Other("FFmpeg 间隔截图失败".into()));
+    }
+
+    // 收集生成的 frame_*.png，按编号排序
+    let mut keyframes = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(frames_dir) {
+        let mut pngs: Vec<_> = entries
+            .flatten()
+            .filter(|e| {
+                e.path().extension().and_then(|x| x.to_str()) == Some("png")
+                    && e.file_name().to_string_lossy().starts_with("frame_")
+            })
+            .collect();
+        pngs.sort_by_key(|e| e.file_name().to_os_string());
+        for png in pngs {
+            let stem = png
+                .path()
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let num: u32 = stem
+                .split('_')
+                .nth(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let ts = num.saturating_sub(1) as f64 * interval as f64;
+            keyframes.push(KeyframeEntry {
+                file: png.file_name().to_string_lossy().to_string(),
+                timestamp_seconds: ts,
+                timestamp_label: kf_timestamp_label(ts),
+                trigger: "interval".into(),
+            });
+        }
+    }
+    Ok(keyframes)
+}
+
+/// 场景检测截图 — 两遍法，复刻 Python `extract_scene_frames`：
+/// Pass1 `showinfo` 检测场景变化 pts_time；Pass2 逐帧精确截图
+fn extract_scene_frames(
+    video: &std::path::Path,
+    frames_dir: &std::path::Path,
+    max_frames: usize,
+    ffmpeg: &str,
+    threshold: f64,
+    min_gap: f64,
+    _max_gap: f64,
+) -> Result<Vec<KeyframeEntry>, AppError> {
+    let null_dev = if cfg!(target_os = "windows") {
+        "NUL"
+    } else {
+        "/dev/null"
+    };
+    let filter_v = format!("select=gt(scene\\,{threshold}),showinfo");
+
+    // Pass 1: 检测场景变化 pts_time
+    let mut cmd = std::process::Command::new(ffmpeg);
+    apply_windows_no_window(&mut cmd);
+    let output = cmd
+        .args([
+            "-i",
+            &video.to_string_lossy(),
+            "-vf",
+            &filter_v,
+            "-vsync",
+            "vfr",
+            "-f",
+            "null",
+            "-y",
+            null_dev,
+        ])
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .output()
+        .map_err(|e| AppError::Other(format!("FFmpeg 场景检测执行失败: {e}")))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut pts_times: Vec<f64> = Vec::new();
+    for line in stderr.lines() {
+        if let Some(pos) = line.find("pts_time:") {
+            let rest = &line[pos + "pts_time:".len()..];
+            let num_str: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if let Ok(pts) = num_str.parse::<f64>() {
+                pts_times.push(pts);
+            }
+        }
+    }
+
+    if pts_times.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 去重：enforce min_gap
+    let mut deduped: Vec<f64> = Vec::new();
+    let mut last_ts = -min_gap - 1.0;
+    for pts in pts_times {
+        if pts - last_ts < min_gap {
+            continue;
+        }
+        deduped.push(pts);
+        last_ts = pts;
+    }
+
+    let timestamps: Vec<f64> = deduped.into_iter().take(max_frames).collect();
+
+    // Pass 2: 逐帧截图
+    let mut keyframes = Vec::new();
+    for (index, ts) in timestamps.iter().enumerate() {
+        let idx = index + 1;
+        let safe_tag = format!("{ts:.1}s").replace('.', "_");
+        let output_path = frames_dir.join(format!("scene_{idx:04}_{safe_tag}.png"));
+        let mut cmd = std::process::Command::new(ffmpeg);
+        apply_windows_no_window(&mut cmd);
+        let status = cmd
+            .args([
+                "-ss",
+                &format!("{ts:.3}"),
+                "-i",
+                &video.to_string_lossy(),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                "-y",
+                &output_path.to_string_lossy(),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|e| AppError::Other(format!("FFmpeg 场景截图执行失败: {e}")))?;
+
+        if !status.success() {
+            log::warn!(
+                "[keyframes] scene frame {idx} at {ts:.3}s failed (exit {:?})",
+                status.code()
+            );
+        }
+        if output_path.exists() {
+            keyframes.push(KeyframeEntry {
+                file: output_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+                timestamp_seconds: *ts,
+                timestamp_label: kf_timestamp_label(*ts),
+                trigger: "scene".into(),
+            });
+        }
+    }
+    Ok(keyframes)
+}
+
+/// 原生关键帧提取（替代 extract_keyframes.py）
+///
+/// 参数与 Python 脚本 CLI 完全一致，输出 `output_dir/frames/keyframes.json` + PNG。
+/// keyframes.json 包含 `trigger` 字段（供 Vision 审查读取），与 Python 脚本输出格式一致。
+fn extract_keyframes_native(
+    video: &std::path::Path,
+    output_dir: &std::path::Path,
+    mode: &str,
+    interval: u32,
+    max_frames: u32,
+    timestamps_path: Option<&std::path::Path>,
+    scene_threshold: f64,
+    min_gap: f64,
+    max_gap: f64,
+) -> Result<KeyframeResult, AppError> {
+    let ffmpeg = resolve_ffmpeg_binary("ffmpeg")
+        .ok_or_else(|| AppError::MissingDependency("FFmpeg 未安装或不在 PATH".into()))?;
+
+    if !video.exists() {
+        return Err(AppError::Other(format!(
+            "视频文件不存在: {}",
+            video.display()
+        )));
+    }
+
+    let frames_dir = output_dir.join("frames");
+    std::fs::create_dir_all(&frames_dir).map_err(AppError::Io)?;
+
+    let mut all_keyframes: Vec<KeyframeEntry> = Vec::new();
+
+    // 引导时间点
+    let guided = load_guided_timestamps(timestamps_path);
+    if !guided.is_empty() {
+        log::debug!(target: "agent", "[keyframes] phase=guided count={}", guided.len());
+        let guided_frames = extract_guided_frames(
+            video,
+            &frames_dir,
+            &guided,
+            max_frames as usize,
+            &ffmpeg,
+        )?;
+        all_keyframes.extend(guided_frames);
+    }
+
+    // 间隔模式
+    if mode == "interval" || mode == "both" {
+        log::debug!(target: "agent", "[keyframes] phase=interval interval={interval}");
+        let interval_frames =
+            extract_interval_frames(video, &frames_dir, interval, max_frames, &ffmpeg)?;
+        all_keyframes.extend(interval_frames);
+    }
+
+    // 场景模式
+    if mode == "scene" || mode == "both" {
+        let scene_max = if mode == "scene" {
+            max_frames as usize
+        } else {
+            std::cmp::max(max_frames as usize / 3, 5)
+        };
+        log::debug!(target: "agent", "[keyframes] phase=scene threshold={scene_threshold} max={scene_max}");
+        let scene_frames = extract_scene_frames(
+            video,
+            &frames_dir,
+            scene_max,
+            &ffmpeg,
+            scene_threshold,
+            min_gap,
+            max_gap,
+        )?;
+        all_keyframes.extend(scene_frames);
+    }
+
+    // 去重（按文件名）并按时间戳排序
+    all_keyframes.sort_by(|a, b| {
+        a.timestamp_seconds
+            .partial_cmp(&b.timestamp_seconds)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut seen_files = std::collections::HashSet::new();
+    let mut unique: Vec<KeyframeEntry> = Vec::new();
+    for kf in all_keyframes {
+        if seen_files.insert(kf.file.clone()) {
+            unique.push(kf);
+        }
+    }
+
+    // 限制最大帧数
+    unique.truncate(max_frames as usize);
+
+    // 写 keyframes.json（含 trigger 字段，与 Python 脚本输出一致）
+    let index_data: Vec<serde_json::Value> = unique
+        .iter()
+        .map(|kf| {
+            serde_json::json!({
+                "file": kf.file,
+                "timestamp_seconds": kf.timestamp_seconds,
+                "timestamp_label": kf.timestamp_label,
+                "trigger": kf.trigger,
+            })
+        })
+        .collect();
+    let index_path = frames_dir.join("keyframes.json");
+    std::fs::write(
+        &index_path,
+        serde_json::to_string_pretty(&index_data).unwrap_or_else(|_| "[]".into()),
+    )
+    .map_err(AppError::Io)?;
+
+    log::debug!(
+        target: "agent",
+        "[keyframes] phase=done frames={} index={}",
+        unique.len(),
+        index_path.display()
+    );
+
+    let keyframes: Vec<KeyframeInfo> = unique
+        .into_iter()
+        .map(|kf| KeyframeInfo {
+            file: kf.file,
+            timestamp_seconds: kf.timestamp_seconds,
+            timestamp_label: kf.timestamp_label,
+        })
+        .collect();
+
+    Ok(KeyframeResult {
+        result: KeyframeData {
+            video_path: video.to_string_lossy().to_string(),
+            output_dir: output_dir.to_string_lossy().to_string(),
+            mode: mode.to_string(),
+            interval,
+            max_frames,
+            keyframes,
+        },
+    })
+}
+
+/// 关键帧提取（Tauri 命令，从 python.rs 迁移）
+///
+/// 替代原 `python.rs::extract_keyframes`（Python 子进程中转）。
+/// `python_path` 参数保留以维持前端 IPC 契约，但不再使用。
+#[tauri::command]
+pub async fn extract_keyframes(
+    video_path: String,
+    output_dir: String,
+    #[allow(unused_variables)] python_path: String,
+    interval: u32,
+    max_frames: u32,
+    mode: String,
+) -> Result<KeyframeResult, AppError> {
+    let video = PathBuf::from(&video_path);
+    let output = PathBuf::from(&output_dir);
+    extract_keyframes_native(
+        &video,
+        &output,
+        &mode,
+        interval,
+        max_frames,
+        None,
+        0.25,
+        3.0,
+        120.0,
+    )
+}
+
+/// 调用原生关键帧提取（支持可选的引导时间点），返回截图输出目录
 /// 只使用 smart 模式：字幕引导时间点 + 场景变化检测，不使用固定间隔
 pub(crate) fn extract_keyframes_guided(
-    python_path: &str,
+    #[allow(unused_variables)] python_path: &str,
     video: &PathBuf,
     output_dir: &PathBuf,
     guided_timestamps: Option<&std::path::Path>,
 ) -> Result<PathBuf, AppError> {
-    use crate::commands::python::run_python_script;
-
     if !video.exists() {
         return Err(AppError::Other("视频文件不存在".into()));
     }
 
-    let mut args: Vec<String> = vec![
-        "--video".into(),
-        video.to_string_lossy().to_string(),
-        "--output-dir".into(),
-        output_dir.to_string_lossy().to_string(),
-        // 强制 scene 模式（不使用固定间隔）
-        "--mode".into(),
-        "scene".into(),
-        "--max-frames".into(),
-        "40".into(),
-        "--scene-threshold".into(),
-        "0.25".into(),
-        "--max-gap".into(),
-        "120".into(),
-        "--min-gap".into(),
-        "3".into(),
-    ];
-
     if let Some(ts_path) = guided_timestamps {
         if ts_path.exists() {
-            args.push("--timestamps".into());
-            args.push(ts_path.to_string_lossy().to_string());
-            log::debug!(target: "agent",
+            log::debug!(
+                target: "agent",
                 "[pipeline] keyframes extraction with guided timestamps: {}",
                 ts_path.display()
             );
         }
     }
 
-    let result = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(async { run_python_script(python_path, "extract_keyframes.py", &args).await })
-    })?;
+    log::debug!(target: "agent", "[pipeline] keyframes extraction (native FFmpeg)");
 
-    if !result.success {
-        return Err(AppError::PythonScript {
-            script: "extract_keyframes".into(),
-            stderr: result.stderr,
-        });
-    }
+    extract_keyframes_native(
+        video,
+        output_dir,
+        "scene",
+        30,
+        40,
+        guided_timestamps,
+        0.25,
+        3.0,
+        120.0,
+    )?;
 
     Ok(output_dir.clone())
 }
@@ -906,4 +1438,82 @@ pub(crate) fn generate_temp_id(input: &str) -> String {
     let mut h = DefaultHasher::new();
     input.hash(&mut h);
     format!("{:x}", h.finish())
+}
+
+#[cfg(test)]
+mod keyframe_tests {
+    use super::*;
+
+    #[test]
+    fn timestamp_label_minutes() {
+        assert_eq!(kf_timestamp_label(0.0), "00m00s");
+        assert_eq!(kf_timestamp_label(63.0), "01m03s");
+        assert_eq!(kf_timestamp_label(183.4), "03m03s");
+    }
+
+    #[test]
+    fn timestamp_label_hours() {
+        assert_eq!(kf_timestamp_label(3661.0), "01h01m01s");
+        assert_eq!(kf_timestamp_label(7385.0), "02h03m05s");
+    }
+
+    #[test]
+    fn timestamp_label_negative_clamps_to_zero() {
+        assert_eq!(kf_timestamp_label(-5.0), "00m00s");
+    }
+
+    #[test]
+    fn slug_reason_chinese() {
+        assert_eq!(kf_slug_reason("AI推荐"), "AI推荐");
+        assert_eq!(kf_slug_reason("开场 白"), "开场_白");
+    }
+
+    #[test]
+    fn slug_reason_empty_falls_back() {
+        assert_eq!(kf_slug_reason(""), "guided");
+        assert_eq!(kf_slug_reason("!!!"), "guided");
+    }
+
+    #[test]
+    fn slug_reason_truncates_to_24() {
+        let long = "a".repeat(30);
+        let result = kf_slug_reason(&long);
+        assert_eq!(result.len(), 24);
+    }
+
+    #[test]
+    fn load_guided_timestamps_none_path() {
+        let result = load_guided_timestamps(None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn load_guided_timestamps_nonexistent_path() {
+        let result = load_guided_timestamps(Some(std::path::Path::new("/nonexistent/file.json")));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn load_guided_timestamps_dedup_2sec() {
+        let dir = std::env::temp_dir().join("kf_test_dedup.json");
+        let json = r#"[{"ts": 10.0, "reason": "A"}, {"ts": 11.5, "reason": "B"}, {"ts": 20.0, "reason": "C"}]"#;
+        std::fs::write(&dir, json).unwrap();
+        let result = load_guided_timestamps(Some(&dir));
+        std::fs::remove_file(&dir).ok();
+        // 10.0 and 11.5 are within 2 sec → deduped; 20.0 kept
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].0, 10.0);
+        assert_eq!(result[1].0, 20.0);
+    }
+
+    #[test]
+    fn load_guided_timestamps_array_of_numbers() {
+        let dir = std::env::temp_dir().join("kf_test_nums.json");
+        let json = r#"[5.0, 15.0, 30.0]"#;
+        std::fs::write(&dir, json).unwrap();
+        let result = load_guided_timestamps(Some(&dir));
+        std::fs::remove_file(&dir).ok();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].1, "AI推荐");
+    }
 }
