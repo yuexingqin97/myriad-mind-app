@@ -70,3 +70,51 @@
 - 迁 FFmpeg 截图时，参数（`-vf fps=...` / `scene_threshold`）与现有脚本保持一致，避免行为差异
 - 删 Python 脚本后，更新 `tauri.conf.json` 的 `bundle.resources`（去掉不再打包的 .py）
 - 每次迁一个脚本，`cargo check` + 跑一次对应的管线分流验证，逐脚本推进
+
+---
+
+## 六、本次实施（2026-06-24）
+
+### 实施范围
+
+一次性完成前 2 个脚本迁移：
+
+| 脚本 | 目标模块 | 核心方案 |
+|------|---------|---------|
+| `list_ai_douyin_tasks.py` | `commands/ai_douyin.rs` | `reqwest::Client` 直调 AI Douyin API，替代 Python `urllib.request` |
+| `extract_keyframes.py` | `commands/media.rs` | `std::process::Command` 直调 FFmpeg，替代 Python `subprocess.run` |
+
+### 影响范围
+
+**新增文件：**
+- `apps/desktop/src-tauri/src/commands/ai_douyin.rs` — AI Douyin 任务查询（纯 reqwest HTTP）
+- `apps/desktop/src-tauri/src/commands/media.rs` — 关键帧提取（纯 FFmpeg 子进程）+ FFmpeg 定位
+
+**修改文件：**
+- `commands/mod.rs` — 添加 `pub mod ai_douyin;` + `pub mod media;`
+- `lib.rs` — 改 import 源
+- `commands/python.rs` — 删除 `extract_keyframes`、`list_ai_douyin_tasks` 命令及相关类型
+- `commands/pipeline.rs` — `extract_keyframes_guided` 改为调用 `media.rs` 函数，不再走 Python 子进程
+- `commands/tools/handlers/acquire.rs` — `QueryAiDouyinHandler` 调用新函数签名（去除 `python_path`）
+- `apps/desktop/src/api.ts` — `listAiDouyinTasks` 去除 `pythonPath` 参数
+
+**删除文件：**
+- `scripts/list_ai_douyin_tasks.py`
+- `scripts/extract_keyframes.py`
+
+### 行为一致性保证
+
+| 维度 | 保证方式 |
+|------|---------|
+| 参数 | 新函数签名逻辑等价：`list_ai_douyin_tasks(api_key, api_base?, page?, page_size?, status?, search?)` |
+| 输出 | JSON 结构完全相同（`AiDouyinTaskList { #[serde(flatten)] data: Value }` / `KeyframeResult { result: KeyframeData }`） |
+| 错误语义 | HTTP 错误 → `AppError::Http`，FFmpeg 失败 → `AppError::Other`，同原 Python stderr 信息 |
+| 日志 | 保留 `target: "agent"` 埋点，格式一致（`[douyin]` / `[media]` prefix） |
+
+### 回滚策略
+
+1. `git checkout` 恢复被删的两个 `.py` 文件
+2. 恢复 `python.rs` 中两段代码（从 git history）
+3. 恢复 `lib.rs` / `mod.rs` / `acquire.rs` / `api.ts` 的 import 改动
+4. 删除新增的 `ai_douyin.rs` 和 `media.rs`
+5. `cargo check` 验证

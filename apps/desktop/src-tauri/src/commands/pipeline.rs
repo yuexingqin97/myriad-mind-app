@@ -842,62 +842,16 @@ pub(crate) fn extract_audio_ffmpeg(video: &PathBuf, audio: &PathBuf) -> Result<(
     Ok(())
 }
 
-/// 调用 extract_keyframes.py（支持可选的引导时间点），返回截图输出目录
+/// 关键帧提取（支持可选的引导时间点），返回截图输出目录
 /// 只使用 smart 模式：字幕引导时间点 + 场景变化检测，不使用固定间隔
+/// 已从 Python 子进程迁移为 Rust 直调 FFmpeg（见 commands/media.rs）
 pub(crate) fn extract_keyframes_guided(
-    python_path: &str,
+    _python_path: &str,
     video: &PathBuf,
     output_dir: &PathBuf,
     guided_timestamps: Option<&std::path::Path>,
 ) -> Result<PathBuf, AppError> {
-    use crate::commands::python::run_python_script;
-
-    if !video.exists() {
-        return Err(AppError::Other("视频文件不存在".into()));
-    }
-
-    let mut args: Vec<String> = vec![
-        "--video".into(),
-        video.to_string_lossy().to_string(),
-        "--output-dir".into(),
-        output_dir.to_string_lossy().to_string(),
-        // 强制 scene 模式（不使用固定间隔）
-        "--mode".into(),
-        "scene".into(),
-        "--max-frames".into(),
-        "40".into(),
-        "--scene-threshold".into(),
-        "0.25".into(),
-        "--max-gap".into(),
-        "120".into(),
-        "--min-gap".into(),
-        "3".into(),
-    ];
-
-    if let Some(ts_path) = guided_timestamps {
-        if ts_path.exists() {
-            args.push("--timestamps".into());
-            args.push(ts_path.to_string_lossy().to_string());
-            log::debug!(target: "agent",
-                "[pipeline] keyframes extraction with guided timestamps: {}",
-                ts_path.display()
-            );
-        }
-    }
-
-    let result = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(async { run_python_script(python_path, "extract_keyframes.py", &args).await })
-    })?;
-
-    if !result.success {
-        return Err(AppError::PythonScript {
-            script: "extract_keyframes".into(),
-            stderr: result.stderr,
-        });
-    }
-
-    Ok(output_dir.clone())
+    crate::commands::media::extract_keyframes_guided(video, output_dir, guided_timestamps)
 }
 
 pub(crate) fn generate_temp_id(input: &str) -> String {

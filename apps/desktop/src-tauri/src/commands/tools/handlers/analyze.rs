@@ -11,7 +11,7 @@ use crate::commands::tools::{
 use crate::error::AppError;
 use std::path::PathBuf;
 
-/// 关键帧抽取：调 extract_keyframes.py（scene 模式 + 可选引导时间戳），
+/// 关键帧抽取：Rust 直调 FFmpeg（scene 模式 + 可选引导时间戳），
 /// 把 .png 截图目录以 Screenshots artifact 引用回喂。
 pub struct ExtractKeyframesHandler;
 

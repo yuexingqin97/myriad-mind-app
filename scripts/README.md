@@ -2,16 +2,23 @@
 
 > 这些脚本来自上游项目 [大衍决 Claude Code Skill](https://github.com/yuexingqin97/MyClaude/tree/main/myriad-mind/scripts)，以黑盒子子进程方式被 Rust 后端调度。
 
+> **迁移说明（2026-06-24）**：`list_ai_douyin_tasks.py` 与 `extract_keyframes.py` 已迁移为 Rust 直连实现（`commands/ai_douyin.rs` + `commands/media.rs`），不再作为 Python 脚本存在。详见 [`docs/设计文档/工程化/Python到Rust迁移计划.md`](../docs/设计文档/工程化/Python到Rust迁移计划.md)。
+
 ## 脚本清单
 
 | 脚本 | 用途 | CLI 入口 |
 |------|------|----------|
 | `transcribe_faster_whisper.py` | 音频转写 (ASR) | `python transcribe_faster_whisper.py <audio_path> --output-dir <dir>` |
-| `extract_keyframes.py` | 关键帧截图 | `python extract_keyframes.py --video <path> --output-dir <dir>` |
 | `download_video_candidates.py` | 下载视频（多 URL 候选） | `python download_video_candidates.py --response-json <file> --output <path>` |
 | `download_youtube_subtitles.py` | YouTube 字幕下载 | `python download_youtube_subtitles.py <url> --output-dir <dir>` |
 | `install_faster_whisper.py` | 安装 faster-whisper venv | `python install_faster_whisper.py [--venv-dir <dir>]` |
-| `list_ai_douyin_tasks.py` | AI Douyin 任务查询 | `python list_ai_douyin_tasks.py --api-key <key> [--json]` |
+
+## 已迁移至 Rust
+
+| 原脚本 | Rust 替代 | 状态 |
+|--------|----------|------|
+| ~~`list_ai_douyin_tasks.py`~~ | `commands/ai_douyin.rs`（reqwest 直连 AI Douyin API） | ✅ 已完成 |
+| ~~`extract_keyframes.py`~~ | `commands/media.rs`（std::process::Command 直调 FFmpeg） | ✅ 已完成 |
 
 ## 约定
 

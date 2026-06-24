@@ -8,6 +8,7 @@ mod error;
 
 use commands::{
     ai::{run_mind_task, test_deepseek_connection},
+    ai_douyin::list_ai_douyin_tasks,
     config::{
         get_config_info, is_first_launch, read_config, reset_config, write_config,
     },
@@ -17,10 +18,11 @@ use commands::{
     },
     fs::{cleanup_temp, copy_asset, get_cache_dir, open_cache_dir, pick_folder, read_text_file, scan_directory, write_note},
     logging::{open_log_dir, set_log_level},
+    media::extract_keyframes,
     pipeline::{execute_pipeline},
     python::{
-        check_python_env, download_video, download_youtube_subtitles, extract_keyframes,
-        install_faster_whisper, list_ai_douyin_tasks, transcribe_audio,
+        check_python_env, download_video, download_youtube_subtitles,
+        install_faster_whisper, transcribe_audio,
     },
 };
 
