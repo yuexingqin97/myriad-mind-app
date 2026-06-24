@@ -35,7 +35,10 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../../../scripts/*.py",
+      "../../../scripts/transcribe_faster_whisper.py",
+      "../../../scripts/download_video_candidates.py",
+      "../../../scripts/download_youtube_subtitles.py",
+      "../../../scripts/install_faster_whisper.py",
       "../../../packages/core/prompts/**/*.md"
     ]
   }

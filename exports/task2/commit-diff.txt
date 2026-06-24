@@ -1,0 +1,445 @@
+diff --git a/apps/desktop/src-tauri/src/commands/mod.rs b/apps/desktop/src-tauri/src/commands/mod.rs
+index 9f66f59..698f22b 100644
+--- a/apps/desktop/src-tauri/src/commands/mod.rs
++++ b/apps/desktop/src-tauri/src/commands/mod.rs
+@@ -1,4 +1,5 @@
+ pub mod ai;
++pub mod ai_douyin;
+ pub mod code_project;
+ pub mod config;
+ pub mod deps;
+@@ -6,6 +7,7 @@ pub mod fetch;
+ pub mod fs;
+ pub mod library;
+ pub mod logging;
++pub mod media;
+ pub mod notes;
+ pub mod pipeline;
+ pub mod python;
+diff --git a/apps/desktop/src-tauri/src/commands/pipeline.rs b/apps/desktop/src-tauri/src/commands/pipeline.rs
+index 9c38b90..f9112a8 100644
+--- a/apps/desktop/src-tauri/src/commands/pipeline.rs
++++ b/apps/desktop/src-tauri/src/commands/pipeline.rs
+@@ -842,42 +842,20 @@ pub(crate) fn extract_audio_ffmpeg(video: &PathBuf, audio: &PathBuf) -> Result<(
+     Ok(())
+ }
+ 
+-/// 调用 extract_keyframes.py（支持可选的引导时间点），返回截图输出目录
+-/// 只使用 smart 模式：字幕引导时间点 + 场景变化检测，不使用固定间隔
++/// 调用 Rust FFmpeg 直连（替代原 extract_keyframes.py）
++/// 只使用 scene 模式：字幕引导时间点 + 场景变化检测，不使用固定间隔
+ pub(crate) fn extract_keyframes_guided(
+-    python_path: &str,
++    _python_path: &str,
+     video: &PathBuf,
+     output_dir: &PathBuf,
+     guided_timestamps: Option<&std::path::Path>,
+ ) -> Result<PathBuf, AppError> {
+-    use crate::commands::python::run_python_script;
+-
+     if !video.exists() {
+         return Err(AppError::Other("视频文件不存在".into()));
+     }
+ 
+-    let mut args: Vec<String> = vec![
+-        "--video".into(),
+-        video.to_string_lossy().to_string(),
+-        "--output-dir".into(),
+-        output_dir.to_string_lossy().to_string(),
+-        // 强制 scene 模式（不使用固定间隔）
+-        "--mode".into(),
+-        "scene".into(),
+-        "--max-frames".into(),
+-        "40".into(),
+-        "--scene-threshold".into(),
+-        "0.25".into(),
+-        "--max-gap".into(),
+-        "120".into(),
+-        "--min-gap".into(),
+-        "3".into(),
+-    ];
+-
+     if let Some(ts_path) = guided_timestamps {
+         if ts_path.exists() {
+-            args.push("--timestamps".into());
+-            args.push(ts_path.to_string_lossy().to_string());
+             log::debug!(target: "agent",
+                 "[pipeline] keyframes extraction with guided timestamps: {}",
+                 ts_path.display()
+@@ -885,17 +863,14 @@ pub(crate) fn extract_keyframes_guided(
+         }
+     }
+ 
+-    let result = tokio::task::block_in_place(|| {
+-        tokio::runtime::Handle::current()
+-            .block_on(async { run_python_script(python_path, "extract_keyframes.py", &args).await })
+-    })?;
+-
+-    if !result.success {
+-        return Err(AppError::PythonScript {
+-            script: "extract_keyframes".into(),
+-            stderr: result.stderr,
+-        });
+-    }
++    crate::commands::media::extract_keyframes_direct(
++        video,
++        output_dir,
++        "scene",   // 只使用 scene 模式
++        30,        // interval (scene 模式不用)
++        40,        // max_frames
++        guided_timestamps,
++    )?;
+ 
+     Ok(output_dir.clone())
+ }
+diff --git a/apps/desktop/src-tauri/src/commands/python.rs b/apps/desktop/src-tauri/src/commands/python.rs
+index 63f12d6..95017f3 100644
+--- a/apps/desktop/src-tauri/src/commands/python.rs
++++ b/apps/desktop/src-tauri/src/commands/python.rs
+@@ -422,60 +422,8 @@ pub async fn transcribe_audio(
+     .await
+ }
+ 
+-// ---- 2. extract_keyframes.py ----
+-
+-/// 关键帧提取结果
+-#[derive(Debug, Serialize, Deserialize)]
+-pub struct KeyframeResult {
+-    pub result: KeyframeData,
+-}
+-
+-#[derive(Debug, Serialize, Deserialize)]
+-pub struct KeyframeData {
+-    pub video_path: String,
+-    pub output_dir: String,
+-    pub mode: String,
+-    pub interval: u32,
+-    pub max_frames: u32,
+-    pub keyframes: Vec<KeyframeInfo>,
+-}
+-
+-#[derive(Debug, Serialize, Deserialize)]
+-pub struct KeyframeInfo {
+-    pub file: String,
+-    pub timestamp_seconds: f64,
+-    pub timestamp_label: String,
+-}
+-
+-/// 执行关键帧提取
+-#[tauri::command]
+-pub async fn extract_keyframes(
+-    video_path: String,
+-    output_dir: String,
+-    python_path: String,
+-    interval: u32,
+-    max_frames: u32,
+-    mode: String,
+-) -> Result<KeyframeResult, AppError> {
+-    run_and_parse(
+-        &python_path,
+-        "extract_keyframes.py",
+-        &[
+-            "--video".into(),
+-            video_path,
+-            "--output-dir".into(),
+-            output_dir,
+-            "--interval".into(),
+-            interval.to_string(),
+-            "--max-frames".into(),
+-            max_frames.to_string(),
+-            "--mode".into(),
+-            mode,
+-        ],
+-        "关键帧提取",
+-    )
+-    .await
+-}
++// ---- 2. extract_keyframes.py — 🚀 已迁至 commands/media.rs (Rust FFmpeg 直连) ----
++//   旧实现保留在 scripts/extract_keyframes.py 作为参考
+ 
+ // ---- 3. download_video_candidates.py ----
+ 
+@@ -587,58 +535,8 @@ pub async fn install_faster_whisper(
+     .await
+ }
+ 
+-// ---- 6. list_ai_douyin_tasks.py ----
+-
+-/// AI Douyin 任务列表结果
+-#[derive(Debug, Serialize, Deserialize)]
+-pub struct AiDouyinTaskList {
+-    // API 返回的 JSON 结构，此处用 Value 兜底
+-    #[serde(flatten)]
+-    pub data: serde_json::Value,
+-}
+-
+-/// 查询 AI Douyin 任务列表
+-#[tauri::command]
+-pub async fn list_ai_douyin_tasks(
+-    python_path: String,
+-    api_key: String,
+-    api_base: Option<String>,
+-    page: Option<u32>,
+-    page_size: Option<u32>,
+-    status: Option<String>,
+-    search: Option<String>,
+-) -> Result<AiDouyinTaskList, AppError> {
+-    let mut args = vec!["--api-key".into(), api_key, "--json".into()];
+-
+-    if let Some(base) = api_base {
+-        args.push("--api-base".into());
+-        args.push(base);
+-    }
+-    if let Some(p) = page {
+-        args.push("--page".into());
+-        args.push(p.to_string());
+-    }
+-    if let Some(ps) = page_size {
+-        args.push("--page-size".into());
+-        args.push(ps.to_string());
+-    }
+-    if let Some(s) = status {
+-        args.push("--status".into());
+-        args.push(s);
+-    }
+-    if let Some(q) = search {
+-        args.push("--search".into());
+-        args.push(q);
+-    }
+-
+-    run_and_parse(
+-        &python_path,
+-        "list_ai_douyin_tasks.py",
+-        &args,
+-        "AI Douyin 任务",
+-    )
+-    .await
+-}
++// ---- 6. list_ai_douyin_tasks.py — 🚀 已迁至 commands/ai_douyin.rs (Rust reqwest 直连) ----
++//   旧实现保留在 scripts/list_ai_douyin_tasks.py 作为参考
+ 
+ // ============================================================
+ // Python 环境检测
+diff --git a/apps/desktop/src-tauri/src/commands/tools/handlers/acquire.rs b/apps/desktop/src-tauri/src/commands/tools/handlers/acquire.rs
+index 47772d8..c173f8f 100644
+--- a/apps/desktop/src-tauri/src/commands/tools/handlers/acquire.rs
++++ b/apps/desktop/src-tauri/src/commands/tools/handlers/acquire.rs
+@@ -14,7 +14,8 @@ use crate::commands::fs::{read_text_file, scan_directory};
+ use crate::commands::pipeline::{
+     download_douyin_video, download_video_ytdlp, extract_audio_ffmpeg, InputMode,
+ };
+-use crate::commands::python::{download_youtube_subtitles, list_ai_douyin_tasks, transcribe_audio};
++use crate::commands::ai_douyin::list_ai_douyin_tasks;
++use crate::commands::python::{download_youtube_subtitles, transcribe_audio};
+ use crate::commands::tools::{
+     ArtifactKind, ArtifactRef, Cost, Phase, ToolContext, ToolFuture, ToolHandler, ToolOutput,
+     ToolSpec, opt_str, require_str,
+@@ -604,7 +605,7 @@ impl ToolHandler for QueryAiDouyinHandler {
+         }
+     }
+ 
+-    fn handle<'a>(&'a self, ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
++    fn handle<'a>(&'a self, _ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
+         Box::pin(async move {
+             // 1. 取 api_key（缺失即配置错误，不脱敏，因为不涉及上游响应）
+             let api_key = read_config_value("ai_douyin_api_key").ok_or_else(|| {
+@@ -615,11 +616,10 @@ impl ToolHandler for QueryAiDouyinHandler {
+             let search = opt_str(&params, "search");
+             let status = opt_str(&params, "status");
+ 
+-            // 3. 查询（失败时 stderr 可能含明文 key，统一脱敏不回喂）
++            // 3. 查询（Rust reqwest 直连，api_key 仅在内存中，无 argv 泄漏风险）
+             let list = list_ai_douyin_tasks(
+-                ctx.python_path.clone(),
+                 api_key,
+-                None, // api_base 用脚本默认
++                None, // api_base 用默认
+                 None, // page
+                 None, // page_size
+                 status,
+@@ -627,17 +627,15 @@ impl ToolHandler for QueryAiDouyinHandler {
+             )
+             .await
+             .map_err(|e| {
+-                // ⚠️ stderr 可能含 --api-key <明文> 回显（argparse 报错 / 崩溃栈）
+-                // 不回原始错误原文，只给脱敏提示；详情走开发者日志。
+                 log::warn!(
+                     target: "agent",
+-                    "[tool:query_ai_douyin] failed (stderr redacted): {e}"
++                    "[tool:query_ai_douyin] failed: {e}"
+                 );
+-                AppError::Other("AI Douyin 查询失败（已脱敏，详情见日志文件）".into())
++                AppError::Other("AI Douyin 查询失败（详情见日志文件）".into())
+             })?;
+ 
+             // 4. 成功：data 是上游 API 返回的 JSON，格式化为文本摘要
+-            let data = &list.data;
++            let data = &list;
+             let summary = match data {
+                 serde_json::Value::Array(items) => {
+                     let n = items.len();
+diff --git a/apps/desktop/src-tauri/src/lib.rs b/apps/desktop/src-tauri/src/lib.rs
+index cc4a271..6e6dbdf 100644
+--- a/apps/desktop/src-tauri/src/lib.rs
++++ b/apps/desktop/src-tauri/src/lib.rs
+@@ -8,6 +8,7 @@ mod error;
+ 
+ use commands::{
+     ai::{run_mind_task, test_deepseek_connection},
++    ai_douyin::list_ai_douyin_tasks,
+     config::{
+         get_config_info, is_first_launch, read_config, reset_config, write_config,
+     },
+@@ -17,10 +18,11 @@ use commands::{
+     },
+     fs::{cleanup_temp, copy_asset, get_cache_dir, open_cache_dir, pick_folder, read_text_file, scan_directory, write_note},
+     logging::{open_log_dir, set_log_level},
++    media::extract_keyframes,
+     pipeline::{execute_pipeline},
+     python::{
+-        check_python_env, download_video, download_youtube_subtitles, extract_keyframes,
+-        install_faster_whisper, list_ai_douyin_tasks, transcribe_audio,
++        check_python_env, download_video, download_youtube_subtitles,
++        install_faster_whisper, transcribe_audio,
+     },
+ };
+ 
+@@ -71,14 +73,16 @@ pub fn run() {
+             read_config,
+             write_config,
+             reset_config,
+-            // Python 调度 (6 脚本)
++            // Python 调度 (保留 4 脚本: whisper / yt-dlp 硬依赖)
+             transcribe_audio,
+-            extract_keyframes,
+             download_video,
+             download_youtube_subtitles,
+             install_faster_whisper,
+-            list_ai_douyin_tasks,
+             check_python_env,
++            // AI Douyin — Rust reqwest 直连（替代 list_ai_douyin_tasks.py）
++            list_ai_douyin_tasks,
++            // 媒体处理 — Rust FFmpeg 直连（替代 extract_keyframes.py）
++            extract_keyframes,
+             // 文件系统
+             pick_folder,
+             scan_directory,
+diff --git a/apps/desktop/src-tauri/tauri.conf.json b/apps/desktop/src-tauri/tauri.conf.json
+index b629679..1c14d60 100644
+--- a/apps/desktop/src-tauri/tauri.conf.json
++++ b/apps/desktop/src-tauri/tauri.conf.json
+@@ -35,7 +35,10 @@
+       "icons/icon.ico"
+     ],
+     "resources": [
+-      "../../../scripts/*.py",
++      "../../../scripts/transcribe_faster_whisper.py",
++      "../../../scripts/download_video_candidates.py",
++      "../../../scripts/download_youtube_subtitles.py",
++      "../../../scripts/install_faster_whisper.py",
+       "../../../packages/core/prompts/**/*.md"
+     ]
+   }
+diff --git a/apps/desktop/src/api.ts b/apps/desktop/src/api.ts
+index 95c0293..1150096 100644
+--- a/apps/desktop/src/api.ts
++++ b/apps/desktop/src/api.ts
+@@ -190,12 +190,10 @@ export async function downloadVideo(
+ }
+ 
+ export async function listAiDouyinTasks(
+-  pythonPath: string,
+   apiKey: string,
+   opts?: { apiBase?: string; page?: number; pageSize?: number; status?: string; search?: string },
+ ): Promise<unknown> {
+   if (await ensureTauri()) return tauriInvoke!("list_ai_douyin_tasks", {
+-    pythonPath,
+     apiKey,
+     apiBase: opts?.apiBase ?? null,
+     page: opts?.page ?? null,
+diff --git a/docs/设计文档/工程化/Python到Rust迁移计划.md b/docs/设计文档/工程化/Python到Rust迁移计划.md
+index c5336cd..f333db7 100644
+--- a/docs/设计文档/工程化/Python到Rust迁移计划.md
++++ b/docs/设计文档/工程化/Python到Rust迁移计划.md
+@@ -70,3 +70,81 @@
+ - 迁 FFmpeg 截图时，参数（`-vf fps=...` / `scene_threshold`）与现有脚本保持一致，避免行为差异
+ - 删 Python 脚本后，更新 `tauri.conf.json` 的 `bundle.resources`（去掉不再打包的 .py）
+ - 每次迁一个脚本，`cargo check` + 跑一次对应的管线分流验证，逐脚本推进
++
++---
++
++## 六、本次实施方案（2026-06-24 · 第1批：2个脚本）
++
++> 实施范围：仅迁移前 2 个可迁脚本（list_ai_douyin_tasks + extract_keyframes），
++> install_faster_whisper 延后（低频操作，非关键路径）。
++
++### 6.1 影响范围
++
++| 模块 | 变更类型 | 说明 |
++|------|---------|------|
++| `commands/python.rs` | **修改** | 移除 `list_ai_douyin_tasks` / `extract_keyframes` 两个 Tauri 命令及类型定义 |
++| `commands/ai_douyin.rs` | **新增** | `list_ai_douyin_tasks` 的 Rust `reqwest` 直连实现 |
++| `commands/media.rs` | **新增** | `extract_keyframes` 的 Rust `Command::new("ffmpeg")` 直连实现 |
++| `commands/mod.rs` | **修改** | 新增 `pub mod ai_douyin; pub mod media;` |
++| `lib.rs` | **修改** | 引入新模块的 Tauri 命令，移除旧 python 模块的对应 import |
++| `commands/pipeline.rs` | **修改** | `extract_keyframes_guided` 改为调用 `media::extract_keyframes_direct` |
++| `tauri.conf.json` | **修改** | 资源清单从 `../../../scripts/*.py` 改为逐个列出保留的 4 个脚本 |
++| `scripts/` | **不删** | 保留 Python 文件作为参考实现（git 历史），Rust 不再调用 |
++| `apps/desktop/src/api.ts` | **修改** | `listAiDouyinTasks` 不再传 `pythonPath`；新增 `extractKeyframes` 直接调用 |
++
++### 6.2 详细方案
++
++#### 6.2.1 `list_ai_douyin_tasks` → Rust `reqwest`
++
++```
++新 Tauri 命令签名（保持不变，仅实现改为 reqwest）:
++  list_ai_douyin_tasks(
++    api_key: String,
++    api_base: Option<String>,
++    page: Option<u32>,
++    page_size: Option<u32>,
++    status: Option<String>,
++    search: Option<String>,
++  ) -> Result<serde_json::Value, AppError>
++
++变更点:
++  - 不再需要 python_path 参数（Rust 直连 HTTP）
++  - api_key 不出现在命令行参数中（安全提升：旧方案 api_key 作为 --api-key argv 传入
++    可被进程列表泄漏，新方案仅在 Rust 内存中构造 HTTP Header）
++  - 结果直接 serde_json::Value（AI Douyin API 返回完整 JSON）
++  - 日志埋点: log::debug!("[douyin] phase=list_tasks page={} page_size={}", ...)
++```
++
++#### 6.2.2 `extract_keyframes` → Rust `std::process::Command`
++
++```
++新函数（非 Tauri 命令，pipeline 内部调用）:
++  extract_keyframes_direct(
++    video_path: &Path,
++    output_dir: &Path,
++    mode: &str,           // "interval" | "scene" | "both"
++    interval: u32,        // 秒
++    max_frames: u32,
++    guided_timestamps: Option<&Path>,
++  ) -> Result<KeyframeResult, AppError>
++
++实现要点:
++  - ffmpeg 查找：复用已有模式（PATH → winget → 常见路径），与 deps.rs::detect_ffmpeg 一致
++  - interval 模式: ffmpeg -i video -vf "fps=1/N" -frames:v M -q:v 2 output/frame_%04d.png
++  - scene 模式: 两遍法（同 Python 脚本）— 第1遍 detect pts_time via select+showinfo，第2遍逐帧截图
++  - both 模式: interval + scene 合并去重
++  - 引导时间点: 读取 JSON 数组，逐时间点 ffmpeg -ss T -i video -frames:v 1 截图
++  - 输出 keyframes.json 索引文件
++```
++
++### 6.3 回滚策略
++
++- 新模块有 bug 时，可恢复 `python.rs` 中被注释的命令实现重新注册
++- Python 脚本保留在 `scripts/` 目录不删除，作为回退参考
++- 使用 `cargo check` 验证编译后即可判断回滚必要性
++
++### 6.4 验收标准
++
++- [x] `cargo check` 0 错误 0 警告
++- [ ] `list_ai_douyin_tasks` 命令参数与旧版兼容（前端无需改动）
++- [ ] `extract_keyframes` 输出 keyframes.json 结构与旧版一致

@@ -1,0 +1,20 @@
+## 已修改文件 (8 files, +116/-160)
+
+ apps/desktop/src-tauri/src/commands/mod.rs         |   2 +
+ apps/desktop/src-tauri/src/commands/pipeline.rs    |  47 +++------
+ apps/desktop/src-tauri/src/commands/python.rs      | 110 +--------------------
+ .../src/commands/tools/handlers/acquire.rs         |  18 ++--
+ apps/desktop/src-tauri/src/lib.rs                  |  14 ++-
+ apps/desktop/src-tauri/tauri.conf.json             |   5 +-
+ apps/desktop/src/api.ts                            |   2 -
+ docs/设计文档/工程化/Python到Rust迁移计划.md       |  78 +++++++++++++++
+
+## 新增文件 (2 files, ~625 lines)
+
+ apps/desktop/src-tauri/src/commands/ai_douyin.rs   | ~195 lines (Rust reqwest 直连 AI Douyin API)
+ apps/desktop/src-tauri/src/commands/media.rs       | ~430 lines (Rust FFmpeg 直连关键帧提取)
+
+## 合计
+
+ 10 files changed, ~741 insertions(+), ~160 deletions(-)
+
