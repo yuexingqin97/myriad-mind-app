@@ -3,7 +3,7 @@
 
 use crate::commands::ai::types::ScreenshotReviewConfig;
 use crate::commands::ai::vision::review_keyframes;
-use crate::commands::pipeline::extract_keyframes_guided;
+use crate::commands::media::extract_keyframes_guided;
 use crate::commands::tools::{
     ArtifactKind, ArtifactRef, Cost, Phase, ToolContext, ToolFuture, ToolHandler, ToolOutput,
     ToolSpec, require_str,
@@ -52,12 +52,7 @@ impl ToolHandler for ExtractKeyframesHandler {
             // 2. 调底层抽取函数（同步 block_in_place，内部已封装）
             //    guided_timestamps 传文件不存在时底层自动忽略。
             let guided = timestamps_path.as_ref().map(|s| std::path::Path::new(s));
-            extract_keyframes_guided(
-                &ctx.python_path,
-                &video,
-                &output_dir,
-                guided,
-            )?;
+            extract_keyframes_guided(&video, &output_dir, guided)?;
 
             // 3. extract_keyframes.py 把 PNG + keyframes.json 落在 output_dir/frames/ 子目录
             //    （脚本内 frames_dir = output_dir/"frames"）。统计该子目录下 .png 数量。

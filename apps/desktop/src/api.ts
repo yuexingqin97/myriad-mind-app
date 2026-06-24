@@ -190,12 +190,10 @@ export async function downloadVideo(
 }
 
 export async function listAiDouyinTasks(
-  pythonPath: string,
   apiKey: string,
   opts?: { apiBase?: string; page?: number; pageSize?: number; status?: string; search?: string },
 ): Promise<unknown> {
   if (await ensureTauri()) return tauriInvoke!("list_ai_douyin_tasks", {
-    pythonPath,
     apiKey,
     apiBase: opts?.apiBase ?? null,
     page: opts?.page ?? null,

@@ -112,8 +112,20 @@ impl ToolContext {
                 }
             }
         }
+        let allowed: Vec<String> = self
+            .read_roots()
+            .iter()
+            .filter_map(|p| p.canonicalize().ok())
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
         Err(AppError::Other(format!(
-            "路径不在允许的读取范围（temp/artifacts/note_dir/输入路径）内: {requested}"
+            "路径不在允许的读取范围内: {requested}\n\
+             允许的根目录为：\n{}",
+            allowed
+                .iter()
+                .map(|p| format!("  - {p}"))
+                .collect::<Vec<_>>()
+                .join("\n")
         )))
     }
 }

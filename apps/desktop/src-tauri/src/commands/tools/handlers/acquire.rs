@@ -14,7 +14,8 @@ use crate::commands::fs::{read_text_file, scan_directory};
 use crate::commands::pipeline::{
     download_douyin_video, download_video_ytdlp, extract_audio_ffmpeg, InputMode,
 };
-use crate::commands::python::{download_youtube_subtitles, list_ai_douyin_tasks, transcribe_audio};
+use crate::commands::ai_douyin::list_ai_douyin_tasks;
+use crate::commands::python::{download_youtube_subtitles, transcribe_audio};
 use crate::commands::tools::{
     ArtifactKind, ArtifactRef, Cost, Phase, ToolContext, ToolFuture, ToolHandler, ToolOutput,
     ToolSpec, opt_str, require_str,
@@ -125,42 +126,31 @@ impl ToolHandler for DownloadVideoHandler {
             let output = ctx.temp_dir.join("video.mp4");
             std::fs::create_dir_all(&ctx.temp_dir).map_err(AppError::Io)?;
 
-            // 3. 路由：url 含 youtube → yt-dlp；否则（bilibili/douyin/xhs）→ AI Douyin
+            // 3. 路由：
+            // - YouTube → yt-dlp
+            // - B站 → yt-dlp 优先（AI Douyin 对 B站经常 500/412，仅作后备）
+            // - 抖音/小红书 → AI Douyin 优先
             let lower = url.to_lowercase();
-            let title = if lower.contains("youtube") || lower.contains("youtu.be") {
-                // YouTube → yt-dlp（同步函数）
-                download_video_ytdlp(
-                    &ctx.python_path,
-                    &url,
-                    &InputMode::Youtube,
-                    &output,
-                )?
-            } else {
-                // bilibili/douyin/xhs → AI Douyin API（异步）
-                let mode = if lower.contains("bilibili") || lower.contains("b23.tv") {
-                    InputMode::Bilibili
-                } else {
-                    InputMode::Douyin
-                };
-                // 先尝试 AI Douyin；B站失败回退 yt-dlp（与 pipeline.rs 路由一致）
-                match download_douyin_video(
-                    &ctx.python_path,
-                    &url,
-                    &output,
-                    &ctx.temp_dir,
-                )
-                .await
-                {
+            let is_bilibili = lower.contains("bilibili") || lower.contains("b23.tv");
+            let is_youtube = lower.contains("youtube") || lower.contains("youtu.be");
+
+            let title = if is_youtube {
+                download_video_ytdlp(&ctx.python_path, &url, &InputMode::Youtube, &output)?
+            } else if is_bilibili {
+                // B站：先 yt-dlp；失败再试 AI Douyin
+                match download_video_ytdlp(&ctx.python_path, &url, &InputMode::Bilibili, &output) {
                     Ok(t) => t,
-                    Err(e) if matches!(mode, InputMode::Bilibili) => {
+                    Err(e) => {
                         log::warn!(
                             target: "agent",
-                            "[tool:download_video] ai_douyin failed for bilibili, fallback ytdlp: {e}"
+                            "[tool:download_video] yt-dlp failed for bilibili, fallback ai_douyin: {e}"
                         );
-                        download_video_ytdlp(&ctx.python_path, &url, &InputMode::Bilibili, &output)?
+                        download_douyin_video(&ctx.python_path, &url, &output, &ctx.temp_dir).await?
                     }
-                    Err(e) => return Err(e),
                 }
+            } else {
+                // 抖音/小红书：AI Douyin 优先
+                download_douyin_video(&ctx.python_path, &url, &output, &ctx.temp_dir).await?
             };
 
             // 4. VideoFile artifact（视频文件本身不计 token）
@@ -604,7 +594,7 @@ impl ToolHandler for QueryAiDouyinHandler {
         }
     }
 
-    fn handle<'a>(&'a self, ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
+    fn handle<'a>(&'a self, _ctx: &'a ToolContext, params: serde_json::Value) -> ToolFuture<'a> {
         Box::pin(async move {
             // 1. 取 api_key（缺失即配置错误，不脱敏，因为不涉及上游响应）
             let api_key = read_config_value("ai_douyin_api_key").ok_or_else(|| {
@@ -615,9 +605,8 @@ impl ToolHandler for QueryAiDouyinHandler {
             let search = opt_str(&params, "search");
             let status = opt_str(&params, "status");
 
-            // 3. 查询（失败时 stderr 可能含明文 key，统一脱敏不回喂）
+            // 3. 查询（失败时响应可能含敏感信息，统一脱敏不回喂）
             let list = list_ai_douyin_tasks(
-                ctx.python_path.clone(),
                 api_key,
                 None, // api_base 用脚本默认
                 None, // page

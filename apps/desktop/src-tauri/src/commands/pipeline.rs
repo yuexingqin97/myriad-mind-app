@@ -8,6 +8,7 @@ use crate::commands::python::{python_command_parts, resolve_python_path};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::process::Stdio;
 use tauri::{AppHandle, Emitter};
 
 const PYTHON_MIN_VERSION: (u32, u32) = (3, 9);
@@ -733,23 +734,40 @@ pub(crate) fn download_video_ytdlp(
     log::debug!(target: "agent","[download] yt-dlp: {url}");
     let is_bilibili = matches!(_mode, InputMode::Bilibili);
     let (program, prefix_args) = ytdlp_command(python_path);
+
+    // 可选：用户配置的 cookies.txt 路径（B站/YouTube 登录态）
+    let cookies_file: Option<std::path::PathBuf> =
+        crate::commands::config::read_config_value("ytdlp_cookies_file")
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from);
+
     let mut cmd = std::process::Command::new(&program);
     apply_windows_no_window(&mut cmd);
     cmd.args(&prefix_args);
     cmd.args([
+        "--ignore-config", // 忽略用户全局配置，防止全局配置里写了 --cookies-from-browser 导致锁库报错
         "-o",
         &output_str,
         "--print",
         "%(title)s",
         "--no-playlist",
-        "--remote-components", "ejs:github",
-        "--extractor-args", "youtube:player_client=android,web",
-        "--sleep-requests", "3", "--sleep-interval", "5",
-        "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+        "--remote-components",
+        "ejs:github",
+        "--extractor-args",
+        "youtube:player_client=android,web",
+        "--sleep-requests",
+        "3",
+        "--sleep-interval",
+        "5",
+        "-f",
+        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
     ]);
     //  B站 412 风控：缺 Referer 头会被拒。加上的话大部分视频不需要 Cookie 就能下。
     if is_bilibili {
         cmd.arg("--add-header").arg("Referer:https://www.bilibili.com");
+    }
+    if let Some(ref cf) = cookies_file {
+        cmd.arg("--cookies").arg(cf);
     }
     cmd.arg(url)
         .env("PYTHONUTF8", "1")
@@ -759,34 +777,68 @@ pub(crate) fn download_video_ytdlp(
         .output()
         .map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
 
-    //  裸跑被 412 挡了？试 cookies-from-browser（B站受限内容需要登录态）。
+    //  裸跑被 412 挡了？尝试带登录态重跑。
     if !r.status.success() && is_bilibili {
         let stderr_first = String::from_utf8_lossy(&r.stderr);
         if stderr_first.contains("412") {
-            log::warn!("[download] yt-dlp 裸跑 412，降级 --cookies-from-browser edge: {url}");
+            let has_cookies_file = cookies_file.is_some();
+            if has_cookies_file {
+                log::warn!("[download] yt-dlp 裸跑 412，使用配置 cookies 文件重试: {url}");
+            } else {
+                log::warn!("[download] yt-dlp 裸跑 412，降级 --cookies-from-browser edge: {url}");
+            }
             let mut cmd2 = std::process::Command::new(&program);
             apply_windows_no_window(&mut cmd2);
             cmd2.args(&prefix_args);
             cmd2.args([
-                "-o", &output_str,
-                "--print", "%(title)s",
+                "--ignore-config",
+                "-o",
+                &output_str,
+                "--print",
+                "%(title)s",
                 "--no-playlist",
-                "--remote-components", "ejs:github",
-                "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
-                "--add-header", "Referer:https://www.bilibili.com",
-                "--cookies-from-browser", "edge",
-                url,
-            ])
-            .env("PYTHONUTF8", "1")
-            .env("PYTHONIOENCODING", "utf-8");
-            r = cmd2.output().map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
+                "--remote-components",
+                "ejs:github",
+                "-f",
+                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+                "--add-header",
+                "Referer:https://www.bilibili.com",
+            ]);
+            if let Some(ref cf) = cookies_file {
+                cmd2.arg("--cookies").arg(cf);
+            } else {
+                cmd2.arg("--cookies-from-browser").arg("edge");
+            }
+            cmd2.arg(url)
+                .env("PYTHONUTF8", "1")
+                .env("PYTHONIOENCODING", "utf-8");
+            r = cmd2
+                .output()
+                .map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
         }
     }
 
     if !r.status.success() {
         let stderr = String::from_utf8_lossy(&r.stderr);
         log::error!("[download] yt-dlp failed: {stderr}");
-        return Err(AppError::Config(format!("yt-dlp 下载失败: {stderr}")));
+        let user_msg = if stderr.contains("Could not copy") {
+            "yt-dlp 无法复制浏览器 Cookie 数据库（浏览器可能正在运行）。\n\
+             解决方案（任选其一）：\n\
+             1. 关闭 Chrome/Edge 后重试；\n\
+             2. 在设置 → 配置文件中添加 ytdlp_cookies_file 指向导出的 cookies.txt；\n\
+             3. 配置 AI Douyin API Key，B站优先走 AI Douyin 解析。"
+                .into()
+        } else if stderr.contains("412") {
+            "B站返回 412，需要登录态。\n\
+             解决方案（任选其一）：\n\
+             1. 配置 AI Douyin API Key（推荐）；\n\
+             2. 在设置 → 配置文件中添加 ytdlp_cookies_file 指向 B站登录后的 cookies.txt；\n\
+             3. 关闭 Chrome/Edge 后重试，让 yt-dlp 读取浏览器 Cookie。"
+                .into()
+        } else {
+            format!("yt-dlp 下载失败: {stderr}")
+        };
+        return Err(AppError::Config(user_msg));
     }
     let stdout = String::from_utf8_lossy(&r.stdout);
     let title = stdout
@@ -818,9 +870,61 @@ pub(crate) fn media_file_ready(path: &std::path::Path) -> bool {
 }
 
 pub(crate) fn extract_audio_ffmpeg(video: &PathBuf, audio: &PathBuf) -> Result<(), AppError> {
+    if !video.exists() {
+        return Err(AppError::Other(format!(
+            "视频文件不存在: {}",
+            video.display()
+        )));
+    }
+
     let ffmpeg = resolve_ffmpeg_binary("ffmpeg")
         .ok_or_else(|| AppError::MissingDependency("FFmpeg 未安装或不在 PATH".into()))?;
-    let status = std::process::Command::new(ffmpeg)
+
+    // 1. 先用 ffprobe 检查是否存在音频流，避免 ffmpeg -map a 对无音频视频报错
+    if let Some(ffprobe) = resolve_ffmpeg_binary("ffprobe") {
+        let probe = std::process::Command::new(ffprobe)
+            .args([
+                "-v", "error",
+                "-select_streams", "a",
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0",
+                &video.to_string_lossy(),
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output();
+
+        match probe {
+            Ok(output) if output.status.success() => {
+                let has_audio = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .any(|line| line.trim().eq_ignore_ascii_case("audio"));
+                if !has_audio {
+                    return Err(AppError::Other(
+                        "该视频没有音频流，无法提取音频进行 ASR 转写。".into(),
+                    ));
+                }
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                log::warn!(
+                    target: "agent",
+                    "[ffmpeg] ffprobe 检查音频流失败: {stderr}"
+                );
+                // 不阻断，继续尝试 ffmpeg
+            }
+            Err(e) => {
+                log::warn!(
+                    target: "agent",
+                    "[ffmpeg] 无法启动 ffprobe: {e}"
+                );
+                // 不阻断，继续尝试 ffmpeg
+            }
+        }
+    }
+
+    // 2. 提取音频（捕获 stderr 以便诊断）
+    let output = std::process::Command::new(ffmpeg)
         .args([
             "-i",
             &video.to_string_lossy(),
@@ -831,73 +935,26 @@ pub(crate) fn extract_audio_ffmpeg(video: &PathBuf, audio: &PathBuf) -> Result<(
             "-y",
             &audio.to_string_lossy(),
         ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_err(|_| AppError::MissingDependency("FFmpeg 未安装或不在 PATH".into()))?;
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| AppError::MissingDependency(format!("FFmpeg 无法启动: {e}")))?;
 
-    if !status.success() {
-        return Err(AppError::Other("FFmpeg 音频提取失败".into()));
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_summary: String = stderr.chars().take(500).collect();
+        log::error!(target: "agent", "[ffmpeg] 音频提取失败: {stderr_summary}");
+
+        let user_msg = if stderr.contains("does not contain any stream")
+            || stderr.contains("Stream map 'a'")
+        {
+            "该视频没有音频流，无法提取音频进行 ASR 转写。".into()
+        } else {
+            format!("FFmpeg 音频提取失败: {stderr_summary}")
+        };
+        return Err(AppError::Other(user_msg));
     }
     Ok(())
-}
-
-/// 调用 extract_keyframes.py（支持可选的引导时间点），返回截图输出目录
-/// 只使用 smart 模式：字幕引导时间点 + 场景变化检测，不使用固定间隔
-pub(crate) fn extract_keyframes_guided(
-    python_path: &str,
-    video: &PathBuf,
-    output_dir: &PathBuf,
-    guided_timestamps: Option<&std::path::Path>,
-) -> Result<PathBuf, AppError> {
-    use crate::commands::python::run_python_script;
-
-    if !video.exists() {
-        return Err(AppError::Other("视频文件不存在".into()));
-    }
-
-    let mut args: Vec<String> = vec![
-        "--video".into(),
-        video.to_string_lossy().to_string(),
-        "--output-dir".into(),
-        output_dir.to_string_lossy().to_string(),
-        // 强制 scene 模式（不使用固定间隔）
-        "--mode".into(),
-        "scene".into(),
-        "--max-frames".into(),
-        "40".into(),
-        "--scene-threshold".into(),
-        "0.25".into(),
-        "--max-gap".into(),
-        "120".into(),
-        "--min-gap".into(),
-        "3".into(),
-    ];
-
-    if let Some(ts_path) = guided_timestamps {
-        if ts_path.exists() {
-            args.push("--timestamps".into());
-            args.push(ts_path.to_string_lossy().to_string());
-            log::debug!(target: "agent",
-                "[pipeline] keyframes extraction with guided timestamps: {}",
-                ts_path.display()
-            );
-        }
-    }
-
-    let result = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(async { run_python_script(python_path, "extract_keyframes.py", &args).await })
-    })?;
-
-    if !result.success {
-        return Err(AppError::PythonScript {
-            script: "extract_keyframes".into(),
-            stderr: result.stderr,
-        });
-    }
-
-    Ok(output_dir.clone())
 }
 
 pub(crate) fn generate_temp_id(input: &str) -> String {

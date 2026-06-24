@@ -1,0 +1,211 @@
+diff --git a/apps/desktop/src-tauri/Cargo.toml b/apps/desktop/src-tauri/Cargo.toml
+index 178996e..18317d7 100644
+--- a/apps/desktop/src-tauri/Cargo.toml
++++ b/apps/desktop/src-tauri/Cargo.toml
+@@ -21,7 +21,7 @@ tauri-plugin-log = "2"
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ thiserror = "2"
+-reqwest = { version = "0.12", features = ["json", "stream"] }
++reqwest = { version = "0.12", features = ["json", "stream", "gzip"] }
+ tokio = { version = "1", features = ["full"] }
+ tokio-stream = "0.1"
+ dotenvy = "0.15"
+diff --git a/apps/desktop/src-tauri/src/commands/pipeline.rs b/apps/desktop/src-tauri/src/commands/pipeline.rs
+index 54cf93e..c88fd29 100644
+--- a/apps/desktop/src-tauri/src/commands/pipeline.rs
++++ b/apps/desktop/src-tauri/src/commands/pipeline.rs
+@@ -733,24 +733,41 @@ pub(crate) fn download_video_ytdlp(
+     log::debug!(target: "agent","[download] yt-dlp: {url}");
+     let is_bilibili = matches!(_mode, InputMode::Bilibili);
+     let (program, prefix_args) = ytdlp_command(python_path);
++
++    // 可选：用户配置的 cookies.txt 路径（B站/YouTube 登录态）
++    let cookies_file: Option<std::path::PathBuf> =
++        crate::commands::config::read_config_value("ytdlp_cookies_file")
++            .filter(|s| !s.is_empty())
++            .map(std::path::PathBuf::from);
++
+     let mut cmd = std::process::Command::new(&program);
+     apply_windows_no_window(&mut cmd);
+     cmd.args(&prefix_args);
+     cmd.args([
++        "--ignore-config", // 忽略用户全局配置，防止全局配置里写了 --cookies-from-browser 导致锁库报错
+         "-o",
+         &output_str,
+         "--print",
+         "%(title)s",
+         "--no-playlist",
+-        "--remote-components", "ejs:github",
+-        "--extractor-args", "youtube:player_client=android,web",
+-        "--sleep-requests", "3", "--sleep-interval", "5",
+-        "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
++        "--remote-components",
++        "ejs:github",
++        "--extractor-args",
++        "youtube:player_client=android,web",
++        "--sleep-requests",
++        "3",
++        "--sleep-interval",
++        "5",
++        "-f",
++        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+     ]);
+     //  B站 412 风控：缺 Referer 头会被拒。加上的话大部分视频不需要 Cookie 就能下。
+     if is_bilibili {
+         cmd.arg("--add-header").arg("Referer:https://www.bilibili.com");
+     }
++    if let Some(ref cf) = cookies_file {
++        cmd.arg("--cookies").arg(cf);
++    }
+     cmd.arg(url)
+         .env("PYTHONUTF8", "1")
+         .env("PYTHONIOENCODING", "utf-8");
+@@ -759,34 +776,68 @@ pub(crate) fn download_video_ytdlp(
+         .output()
+         .map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
+ 
+-    //  裸跑被 412 挡了？试 cookies-from-browser（B站受限内容需要登录态）。
++    //  裸跑被 412 挡了？尝试带登录态重跑。
+     if !r.status.success() && is_bilibili {
+         let stderr_first = String::from_utf8_lossy(&r.stderr);
+         if stderr_first.contains("412") {
+-            log::warn!("[download] yt-dlp 裸跑 412，降级 --cookies-from-browser edge: {url}");
++            let has_cookies_file = cookies_file.is_some();
++            if has_cookies_file {
++                log::warn!("[download] yt-dlp 裸跑 412，使用配置 cookies 文件重试: {url}");
++            } else {
++                log::warn!("[download] yt-dlp 裸跑 412，降级 --cookies-from-browser edge: {url}");
++            }
+             let mut cmd2 = std::process::Command::new(&program);
+             apply_windows_no_window(&mut cmd2);
+             cmd2.args(&prefix_args);
+             cmd2.args([
+-                "-o", &output_str,
+-                "--print", "%(title)s",
++                "--ignore-config",
++                "-o",
++                &output_str,
++                "--print",
++                "%(title)s",
+                 "--no-playlist",
+-                "--remote-components", "ejs:github",
+-                "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+-                "--add-header", "Referer:https://www.bilibili.com",
+-                "--cookies-from-browser", "edge",
+-                url,
+-            ])
+-            .env("PYTHONUTF8", "1")
+-            .env("PYTHONIOENCODING", "utf-8");
+-            r = cmd2.output().map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
++                "--remote-components",
++                "ejs:github",
++                "-f",
++                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
++                "--add-header",
++                "Referer:https://www.bilibili.com",
++            ]);
++            if let Some(ref cf) = cookies_file {
++                cmd2.arg("--cookies").arg(cf);
++            } else {
++                cmd2.arg("--cookies-from-browser").arg("edge");
++            }
++            cmd2.arg(url)
++                .env("PYTHONUTF8", "1")
++                .env("PYTHONIOENCODING", "utf-8");
++            r = cmd2
++                .output()
++                .map_err(|e| AppError::Config(format!("yt-dlp 未安装: {e}")))?;
+         }
+     }
+ 
+     if !r.status.success() {
+         let stderr = String::from_utf8_lossy(&r.stderr);
+         log::error!("[download] yt-dlp failed: {stderr}");
+-        return Err(AppError::Config(format!("yt-dlp 下载失败: {stderr}")));
++        let user_msg = if stderr.contains("Could not copy") {
++            "yt-dlp 无法复制浏览器 Cookie 数据库（浏览器可能正在运行）。\n\
++             解决方案（任选其一）：\n\
++             1. 关闭 Chrome/Edge 后重试；\n\
++             2. 在设置 → 配置文件中添加 ytdlp_cookies_file 指向导出的 cookies.txt；\n\
++             3. 配置 AI Douyin API Key，B站优先走 AI Douyin 解析。"
++                .into()
++        } else if stderr.contains("412") {
++            "B站返回 412，需要登录态。\n\
++             解决方案（任选其一）：\n\
++             1. 配置 AI Douyin API Key（推荐）；\n\
++             2. 在设置 → 配置文件中添加 ytdlp_cookies_file 指向 B站登录后的 cookies.txt；\n\
++             3. 关闭 Chrome/Edge 后重试，让 yt-dlp 读取浏览器 Cookie。"
++                .into()
++        } else {
++            format!("yt-dlp 下载失败: {stderr}")
++        };
++        return Err(AppError::Config(user_msg));
+     }
+     let stdout = String::from_utf8_lossy(&r.stdout);
+     let title = stdout
+diff --git a/apps/desktop/src-tauri/src/commands/tools/handlers/acquire.rs b/apps/desktop/src-tauri/src/commands/tools/handlers/acquire.rs
+index b72eb99..6c40046 100644
+--- a/apps/desktop/src-tauri/src/commands/tools/handlers/acquire.rs
++++ b/apps/desktop/src-tauri/src/commands/tools/handlers/acquire.rs
+@@ -126,42 +126,31 @@ impl ToolHandler for DownloadVideoHandler {
+             let output = ctx.temp_dir.join("video.mp4");
+             std::fs::create_dir_all(&ctx.temp_dir).map_err(AppError::Io)?;
+ 
+-            // 3. 路由：url 含 youtube → yt-dlp；否则（bilibili/douyin/xhs）→ AI Douyin
++            // 3. 路由：
++            // - YouTube → yt-dlp
++            // - B站 → yt-dlp 优先（AI Douyin 对 B站经常 500/412，仅作后备）
++            // - 抖音/小红书 → AI Douyin 优先
+             let lower = url.to_lowercase();
+-            let title = if lower.contains("youtube") || lower.contains("youtu.be") {
+-                // YouTube → yt-dlp（同步函数）
+-                download_video_ytdlp(
+-                    &ctx.python_path,
+-                    &url,
+-                    &InputMode::Youtube,
+-                    &output,
+-                )?
+-            } else {
+-                // bilibili/douyin/xhs → AI Douyin API（异步）
+-                let mode = if lower.contains("bilibili") || lower.contains("b23.tv") {
+-                    InputMode::Bilibili
+-                } else {
+-                    InputMode::Douyin
+-                };
+-                // 先尝试 AI Douyin；B站失败回退 yt-dlp（与 pipeline.rs 路由一致）
+-                match download_douyin_video(
+-                    &ctx.python_path,
+-                    &url,
+-                    &output,
+-                    &ctx.temp_dir,
+-                )
+-                .await
+-                {
++            let is_bilibili = lower.contains("bilibili") || lower.contains("b23.tv");
++            let is_youtube = lower.contains("youtube") || lower.contains("youtu.be");
++
++            let title = if is_youtube {
++                download_video_ytdlp(&ctx.python_path, &url, &InputMode::Youtube, &output)?
++            } else if is_bilibili {
++                // B站：先 yt-dlp；失败再试 AI Douyin
++                match download_video_ytdlp(&ctx.python_path, &url, &InputMode::Bilibili, &output) {
+                     Ok(t) => t,
+-                    Err(e) if matches!(mode, InputMode::Bilibili) => {
++                    Err(e) => {
+                         log::warn!(
+                             target: "agent",
+-                            "[tool:download_video] ai_douyin failed for bilibili, fallback ytdlp: {e}"
++                            "[tool:download_video] yt-dlp failed for bilibili, fallback ai_douyin: {e}"
+                         );
+-                        download_video_ytdlp(&ctx.python_path, &url, &InputMode::Bilibili, &output)?
++                        download_douyin_video(&ctx.python_path, &url, &output, &ctx.temp_dir).await?
+                     }
+-                    Err(e) => return Err(e),
+                 }
++            } else {
++                // 抖音/小红书：AI Douyin 优先
++                download_douyin_video(&ctx.python_path, &url, &output, &ctx.temp_dir).await?
+             };
+ 
+             // 4. VideoFile artifact（视频文件本身不计 token）

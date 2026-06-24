@@ -48,7 +48,16 @@ impl TaskState {
         } else {
             self.artifact_refs
                 .iter()
-                .map(|a| format!("  - id: {} | {} | ~{} tok | {}", a.id, a.kind.as_str(), a.tokens_estimate, a.summary))
+                .map(|a| {
+                    format!(
+                        "  - id: {}\n    kind: {}\n    tokens_estimate: {}\n    summary: {}\n    path: {}",
+                        a.id,
+                        a.kind.as_str(),
+                        a.tokens_estimate,
+                        a.summary,
+                        a.path.display()
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         };
@@ -62,7 +71,8 @@ impl TaskState {
                 .join("\n")
         };
         format!(
-            "phase: {:?}\ninput: {}\nartifacts:\n{}\ndecisions:\n{}",
+            "phase: {:?}\ninput: {}\nartifacts:\n{}\ndecisions:\n{}\n\
+             note: 当你需要引用 artifact 的文件路径时，必须使用上面列出的绝对 path，禁止使用 temp_dir/...、./...、/tmp/... 等占位符。",
             self.phase, self.input_summary, arts, decisions
         )
         // 消毒反引号：charter.md 把 task_state_yaml 包在 ```yaml 围栏里，
