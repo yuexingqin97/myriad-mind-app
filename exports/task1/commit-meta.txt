@@ -1,0 +1,17 @@
+commit e60595f5211c0b61c340e74f16e6ee731f56d0ff
+Author: Yxqin <yxqin@users.noreply.github.com>
+Date:   Tue Jun 23 22:42:14 2026 +0800
+
+    feat: 改为流式传输，日志显示ai 推理过程
+
+ apps/desktop/src-tauri/src/agent/runner.rs         | 140 ++++++--
+ apps/desktop/src-tauri/src/commands/ai/deepseek.rs | 359 ++++++++++++++++++++-
+ docs/设计文档/AI与模型/Agent 开发计划.md           |  49 ++-
+ 3 files changed, 514 insertions(+), 34 deletions(-)
+
+审查范围（本提交全部改动）：
+- deepseek.rs：新增 stream_chat_turn（流式 + tool_calls delta 分片累积）；stream_deepseek / chat_turn 日志增强
+- runner.rs：agent loop 由 chat_turn 切到 stream_chat_turn；双层日志（dev 预览 + 用户面板完整）；reasoning_content 回退；终止轮改发 Done
+- Agent 开发计划.md：状态/进度更新（Spike 流式标记已实证；chat_turn 退役为死代码；声明前端无改动）
+
+完整 diff 另存于 exports/task1/commit-e60595f.diff
