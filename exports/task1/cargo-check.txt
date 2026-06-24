@@ -1,0 +1,203 @@
+warning: unused import: `AgentResult`
+  --> src\agent\mod.rs:13:37
+   |
+13 | pub use runner::{run, AgentRequest, AgentResult};
+   |                                     ^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `open_issues` is never read
+  --> src\agent\context.rs:21:9
+   |
+12 | pub struct TaskState {
+   |            --------- field in this struct
+...
+21 |     pub open_issues: Vec<String>,
+   |         ^^^^^^^^^^^
+   |
+   = note: `TaskState` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `note_path` is never read
+  --> src\agent\runner.rs:47:9
+   |
+43 | pub struct AgentResult {
+   |            ----------- field in this struct
+...
+47 |     pub note_path: Option<String>,
+   |         ^^^^^^^^^
+
+warning: function `chat_turn` is never used
+   --> src\commands\ai\deepseek.rs:312:14
+    |
+312 | pub async fn chat_turn(
+    |              ^^^^^^^^^
+
+warning: field `kind` is never read
+   --> src\commands\ai\types.rs:216:9
+    |
+213 | pub struct ToolCall {
+    |            -------- field in this struct
+...
+216 |     pub kind: Option<String>,
+    |         ^^^^
+    |
+    = note: `ToolCall` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `finish_reason` is never read
+   --> src\commands\ai\types.rs:232:9
+    |
+222 | pub struct AgentTurnResult {
+    |            --------------- field in this struct
+...
+232 |     pub finish_reason: Option<String>,
+    |         ^^^^^^^^^^^^^
+    |
+    = note: `AgentTurnResult` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: struct `GuidedTimestamp` is never constructed
+   --> src\commands\ai\types.rs:280:12
+    |
+280 | pub struct GuidedTimestamp {
+    |            ^^^^^^^^^^^^^^^
+
+warning: struct `TutorialDetectionResult` is never constructed
+   --> src\commands\ai\types.rs:324:12
+    |
+324 | pub struct TutorialDetectionResult {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `analyze_subtitle` is never used
+  --> src\commands\ai\vision.rs:24:14
+   |
+24 | pub async fn analyze_subtitle(
+   |              ^^^^^^^^^^^^^^^^
+
+warning: function `detect_tutorial_mode` is never used
+   --> src\commands\ai\vision.rs:426:14
+    |
+426 | pub async fn detect_tutorial_mode(
+    |              ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `NoteSaveResult` is never constructed
+ --> src\commands\notes.rs:6:12
+  |
+6 | pub struct NoteSaveResult {
+  |            ^^^^^^^^^^^^^^
+
+warning: function `save_note` is never used
+  --> src\commands\notes.rs:13:8
+   |
+13 | pub fn save_note(
+   |        ^^^^^^^^^
+
+warning: function `detect_category` is never used
+  --> src\commands\notes.rs:94:4
+   |
+94 | fn detect_category(content: &str, base_dir: &str) -> String {
+   |    ^^^^^^^^^^^^^^^
+
+warning: function `extract_ai_category` is never used
+   --> src\commands\notes.rs:107:4
+    |
+107 | fn extract_ai_category(content: &str) -> Option<String> {
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `normalize_category_name` is never used
+   --> src\commands\notes.rs:133:4
+    |
+133 | fn normalize_category_name(raw: &str) -> Option<String> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `scan_categories` is never used
+   --> src\commands\notes.rs:156:4
+    |
+156 | fn scan_categories(base_dir: &str) -> Vec<String> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: function `resolve_path` is never used
+   --> src\commands\notes.rs:169:4
+    |
+169 | fn resolve_path(cat_dir: &Path, base_name: &str) -> PathBuf {
+    |    ^^^^^^^^^^^^
+
+warning: function `extract_title` is never used
+   --> src\commands\notes.rs:183:4
+    |
+183 | fn extract_title(markdown: &str) -> Option<String> {
+    |    ^^^^^^^^^^^^^
+
+warning: function `title_to_slug` is never used
+   --> src\commands\notes.rs:197:4
+    |
+197 | fn title_to_slug(title: &str) -> String {
+    |    ^^^^^^^^^^^^^
+
+warning: function `build_update_rows` is never used
+   --> src\commands\notes.rs:213:4
+    |
+213 | fn build_update_rows(old_content: &str, version: u32, source_input: &str) -> String {
+    |    ^^^^^^^^^^^^^^^^^
+
+warning: function `extract_update_rows` is never used
+   --> src\commands\notes.rs:229:4
+    |
+229 | fn extract_update_rows(content: &str) -> String {
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_qa_section` is never used
+   --> src\commands\notes.rs:246:4
+    |
+246 | fn extract_qa_section(content: &str) -> String {
+    |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `read_version` is never used
+   --> src\commands\notes.rs:260:4
+    |
+260 | fn read_version(content: &str) -> u32 {
+    |    ^^^^^^^^^^^^
+
+warning: function `extract_metadata_block` is never used
+   --> src\commands\notes.rs:275:4
+    |
+275 | fn extract_metadata_block(content: &str) -> Option<String> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `generate_metadata_block` is never used
+   --> src\commands\notes.rs:291:4
+    |
+291 | fn generate_metadata_block(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `normalize_mermaid_blocks` is never used
+   --> src\commands\notes.rs:336:4
+    |
+336 | fn normalize_mermaid_blocks(markdown: &str) -> String {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `next_non_empty_starts_graph` is never used
+   --> src\commands\notes.rs:392:4
+    |
+392 | fn next_non_empty_starts_graph(lines: &[&str], start: usize) -> bool {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `simple_hash` is never used
+   --> src\commands\notes.rs:438:8
+    |
+438 | pub fn simple_hash(input: &str) -> String {
+    |        ^^^^^^^^^^^
+
+warning: methods `get` and `has` are never used
+  --> src\commands\tools\registry.rs:48:12
+   |
+17 | impl ToolRegistry {
+   | ----------------- methods in this implementation
+...
+48 |     pub fn get(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
+   |            ^^^
+...
+52 |     pub fn has(&self, name: &str) -> bool {
+   |            ^^^
+
+warning: `myriad-mind-desktop` (lib) generated 29 warnings (run `cargo fix --lib -p myriad-mind-desktop` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s

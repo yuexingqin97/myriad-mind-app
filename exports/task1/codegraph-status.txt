@@ -1,0 +1,39 @@
+
+CodeGraph Status
+
+Project: D:\AgentColosseum\myriad-mind-app-glm52-oc
+
+Index Statistics:
+  Files:     86
+  Nodes:     1,134
+  Edges:     2,523
+  DB Size:   3.43 MB
+  Backend:   node:sqlite - built-in (full WAL)
+  Journal:   wal
+
+Nodes by Kind:
+  function        398
+  import          270
+  file            84
+  enum_member     67
+  constant        66
+  interface       66
+  struct          61
+  method          53
+  type_alias      26
+  variable        26
+  enum            10
+  class           6
+  trait           1
+
+Files by Language:
+  rust            31
+  typescript      23
+  tsx             21
+  python          6
+  xml             2
+  yaml            2
+  javascript      1
+
+[OK] Index is up to date
+

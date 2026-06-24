@@ -1,0 +1,7 @@
+
+Impact of changing "chat_turn" — 2 affected symbols:
+
+apps/desktop/src-tauri/src/commands/ai/deepseek.rs
+  function    chat_turn:312
+  file        deepseek.rs:1
+
